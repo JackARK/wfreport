@@ -1,0 +1,67 @@
+:root {
+  --border: #e5e4e7;
+  --accent: #aa3bff;
+  font: 16px/145% system-ui, 'Segoe UI', Roboto, sans-serif;
+  color-scheme: light;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body { margin: 0; }
+
+#app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px;
+  box-sizing: border-box;
+  text-align: left;
+}
+
+nav {
+  display: flex;
+  gap: 8px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+  padding-bottom: 12px;
+}
+
+nav button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--border);
+  background: transparent;
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+nav button.on {
+  background: var(--accent);
+  color: #fff;
+  border-color: var(--accent);
+}
+
+button {
+  font: inherit;
+  padding: 6px 14px;
+  border: 1px solid var(--accent);
+  background: var(--accent);
+  color: #fff;
+  border-radius: 6px;
+  cursor: pointer;
+  margin: 4px 0;
+}
+
+input[type=file] { margin: 0 8px; }
+
+textarea { font: inherit; box-sizing: border-box; }
+
+pre {
+  background: #f4f3ec;
+  padding: 12px;
+  border-radius: 6px;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 14px;
+}
+
+h3 { margin: 16px 0 4px; }
