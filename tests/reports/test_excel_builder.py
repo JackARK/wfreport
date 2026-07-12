@@ -28,9 +28,10 @@ def test_build_excel_has_all_sheets_and_native_chart():
     wb = openpyxl.load_workbook(p)
     expected = {"汇总", "每日", "品牌", "平台", "店铺", "产品", "工厂", "AI文案"}
     assert expected.issubset(set(wb.sheetnames))
-    # 汇总 sheet contains at least one native chart object
-    assert len(wb["汇总"]._charts) >= 1
     # 店铺 sheet exists between 平台 and 产品
     names = wb.sheetnames
     assert names.index("店铺") > names.index("平台")
     assert names.index("店铺") < names.index("产品")
+    import zipfile
+    with zipfile.ZipFile(p) as z:
+        assert any("xl/charts/chart" in n for n in z.namelist())

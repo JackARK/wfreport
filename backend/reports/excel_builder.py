@@ -61,19 +61,47 @@ def build_excel(bundle, recent_weeks, ai_texts: dict, out_path: str) -> str:
             ws.write(i, 1, w["销售额"], money)
             ws.write(i, 2, w["销售毛利"], money)
             ws.write(i, 3, w["销售毛利率"], pct)
-    ch = wb.add_chart({"type": "column"})
-    ch.add_series({"name": "销售额", "values": ["汇总", 0, 1, 0, 1]})
-    ch.add_series({"name": "销售毛利", "values": ["汇总", 1, 1, 1, 1]})
-    ch.set_title({"name": "本周销售概况"})
-    ws.insert_chart("E1", ch)
+    src_row = 20
+    src_col = 9
+    ws.write(src_row, src_col, "本周")
+    ws.write(src_row + 1, src_col, "销售金额")
+    ws.write(src_row + 1, src_col + 1, bundle.overview["销售金额"], money)
+    ws.write(src_row + 2, src_col, "销售毛利")
+    ws.write(src_row + 2, src_col + 1, bundle.overview["销售毛利"], money)
+    ws.write(src_row + 3, src_col, "销售毛利率")
+    ws.write(src_row + 3, src_col + 1, bundle.overview["销售毛利率"], pct)
+
+    col_chart = wb.add_chart({"type": "column"})
+    col_chart.add_series({
+        "name": "销售金额",
+        "categories": ["汇总", src_row, src_col, src_row, src_col],
+        "values": ["汇总", src_row + 1, src_col + 1, src_row + 1, src_col + 1],
+    })
+    col_chart.add_series({
+        "name": "销售毛利",
+        "categories": ["汇总", src_row, src_col, src_row, src_col],
+        "values": ["汇总", src_row + 2, src_col + 1, src_row + 2, src_col + 1],
+    })
+    line_chart = wb.add_chart({"type": "line"})
+    line_chart.add_series({
+        "name": "销售毛利率",
+        "categories": ["汇总", src_row, src_col, src_row, src_col],
+        "values": ["汇总", src_row + 3, src_col + 1, src_row + 3, src_col + 1],
+        "y2_axis": True,
+    })
+    col_chart.set_title({"name": "本周销售概况"})
+    col_chart.set_y_axis({"name": "金额"})
+    col_chart.set_y2_axis({"num_format": "0.00%"})
+    col_chart.combine(line_chart)
+    ws.insert_chart("E1", col_chart)
 
     write_table(wb.add_worksheet("每日"), "每日销售", bundle.daily,
                 numcols=["销售金额", "销售毛利"], pctcols=["销售毛利率"])
     write_table(wb.add_worksheet("品牌"), "品牌", bundle.brand,
-                numcols=["销售金额", "销售数量", "销售毛利", "数量占比"],
+                numcols=["销售金额", "销售数量", "销售毛利"],
                 pctcols=["销售毛利率", "数量占比"])
     write_table(wb.add_worksheet("平台"), "平台", bundle.platform,
-                numcols=["销售数量", "销售金额", "销售毛利", "数量占比"],
+                numcols=["销售数量", "销售金额", "销售毛利"],
                 pctcols=["销售毛利率", "数量占比"])
     # 店铺：TOP15 店铺 × 日期 透视表（数据 only，无原生图表）
     write_table(wb.add_worksheet("店铺"), "TOP15店铺每日销售数量",
