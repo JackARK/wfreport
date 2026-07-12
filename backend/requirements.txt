@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+python-multipart
+pandas
+openpyxl
+xlsxwriter
+plotly
+kaleido
+python-pptx
+pyyaml
+httpx
+pytest

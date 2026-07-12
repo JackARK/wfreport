@@ -1,0 +1,8 @@
+ai:
+  base_url: "https://api.minimaxi.com/v1"
+  model: "MiniMax-M3"
+  temperature: 0.6
+  timeout_seconds: 30
+db_path: "data/wfreport.db"
+output_dir: "output"
+template_path: "resource/2026年第二十七周周报-王凡.pptx"

@@ -1,0 +1,27 @@
+week_compare:
+  system: "你是供应链周报撰写助手，口径务实简洁。"
+  user: |
+    本周：销售额{{cur_amount}}元，销售毛利{{cur_profit}}元，销售毛利率{{cur_margin}}%。
+    上周：销售额{{prev_amount}}元，销售毛利{{prev_profit}}元，销售毛利率{{prev_margin}}%。
+    环比：销售额{{amount_delta}}元（{{amount_delta_rate}}%），毛利{{profit_delta}}元（{{profit_delta_rate}}%），毛利率{{margin_delta_pct}}个百分点。
+    请用2-4句中文写一段"本周概况/较上周"对比叙述，直接输出正文。
+daily_summary:
+  system: "你是供应链周报撰写助手，口径务实简洁。"
+  user: |
+    以下是本周每日的销售额(元)与加权毛利率(%)：
+    {{daily_series}}
+    请分条(<=5点)概括趋势：峰值日、低谷日、周末效应等。直接输出正文。
+procurement:
+  system: "你是供应链周报撰写助手，把用户的简要采购要点润色、分条、结构化。"
+  user: |
+    用户输入的采购工作要点：
+    {{user_input}}
+    请输出 JSON 数组，每个元素：{"事项内容": str, "进度及责任人": [str](<=6条), "状态": str, "完成时间": str}。
+    只输出 JSON，不要解释。
+next_plan:
+  system: "你是供应链周报撰写助手，把用户的简要下周计划润色、分条、结构化。"
+  user: |
+    用户输入的下周计划要点：
+    {{user_input}}
+    请输出 JSON 数组，每个元素：{"事项内容": str, "提出时间": str, "次周预计完成节点名称": str, "涉及部门": str}。
+    只输出 JSON，不要解释。
