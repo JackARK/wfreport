@@ -9,6 +9,7 @@ def test_render_all_pngs():
     d = tempfile.mkdtemp()
     paths = render_all_pngs(b, [], d)
     assert set(paths.keys()) == {"overview","daily","brand_combo","brand_pie","platform",
-                                 "shop_heatmap","product_combo","product_heatmap","new_products","three_weeks"}
+                                 "shop_heatmap","product_combo","product_heatmap","new_products",
+                                 "three_weeks","factory"}
     for p in paths.values():
         assert os.path.exists(p) and os.path.getsize(p) > 0

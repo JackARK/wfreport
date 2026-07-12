@@ -138,3 +138,13 @@ def fig_three_weeks_table(recent_weeks: list) -> go.Figure:
     fig = go.Figure(go.Table(header=dict(values=headers), cells=dict(values=cells)))
     fig.update_layout(title="最近三周")
     return fig
+
+
+def fig_factory_table(b) -> go.Figure:
+    d = b.factory_top5
+    headers = ["工厂", "销售数量", "销售额", "销售毛利率"]
+    cells = [d["工厂"].tolist(), [int(x) for x in d["销售数量"]],
+             [_wan(x) for x in d["销售金额"]], [_pct(x) for x in d["销售毛利率"]]]
+    fig = go.Figure(go.Table(header=dict(values=headers), cells=dict(values=cells)))
+    fig.update_layout(title="供应商(TOP5)")
+    return fig

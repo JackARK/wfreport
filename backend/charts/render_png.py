@@ -20,6 +20,7 @@ def render_all_pngs(bundle, recent_weeks, out_dir: str) -> dict:
         "product_heatmap": pf.fig_product_heatmap(bundle),
         "new_products": pf.fig_new_products(bundle),
         "three_weeks": pf.fig_three_weeks_table(recent_weeks),
+        "factory": pf.fig_factory_table(bundle),
     }
     paths = {}
     for name, fig in mapping.items():
