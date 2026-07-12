@@ -3,6 +3,7 @@ from pathlib import Path
 
 import yaml
 from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi.responses import FileResponse
 
 from backend.ai import client as ai_client, prompts as ai_prompts
 from backend.charts.render_png import render_all_pngs
@@ -15,6 +16,7 @@ from backend.reports.ppt_builder import build_ppt
 router = APIRouter()
 _state = {}  # week_id -> (df, bundle)
 _CFG = Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
+OUT_ROOT = Path("output").resolve()
 
 
 def _db():
@@ -27,7 +29,10 @@ def _db():
 
 @router.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
-    tmp = os.path.join("output", file.filename)
+    safe_name = os.path.basename(file.filename or "").replace("..", "").strip()
+    if not safe_name:
+        safe_name = "upload.xlsx"
+    tmp = os.path.join("output", safe_name)
     os.makedirs("output", exist_ok=True)
     with open(tmp, "wb") as f:
         f.write(await file.read())
@@ -47,7 +52,6 @@ def preview(week_id: str):
     if week_id not in _state:
         raise HTTPException(404, "请先上传")
     _, bundle = _state[week_id]
-    prev = history.get_previous_week(week_id, _db())
     recent = history.get_recent_weeks(3, _db())
     return web_report.build_report_json(bundle, recent)
 
@@ -107,5 +111,14 @@ def generate(week_id: str, payload: dict):
 
 @router.get("/api/download/{week_id}/{name}")
 def download(week_id: str, name: str):
-    from fastapi.responses import FileResponse
-    return FileResponse(os.path.join("output", week_id, name))
+    if (week_id in ("", ".", "..") or name in ("", ".", "..")
+            or "/" in name or "\\" in name or "/" in week_id or "\\" in week_id):
+        raise HTTPException(status_code=404)
+    target = (OUT_ROOT / week_id / name).resolve()
+    try:
+        target.relative_to(OUT_ROOT)
+    except ValueError:
+        raise HTTPException(status_code=404)
+    if not target.is_file():
+        raise HTTPException(status_code=404)
+    return FileResponse(str(target))
