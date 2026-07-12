@@ -47,8 +47,7 @@ def _add_row(table):
     tmpl.addnext(new_tr)
 
 
-def fill_table(table, items: list, col_keys: list, start_row: int = 1):
-    rows = list(table.rows)
+def fill_table(table, items: list, col_keys: list, start_row: int = 1, start_no: int = 1):
     while len(table.rows) > start_row:
         last = len(table.rows) - 1
         tr = table.rows[last]._tr
@@ -56,11 +55,12 @@ def fill_table(table, items: list, col_keys: list, start_row: int = 1):
     for i, item in enumerate(items):
         _add_row(table)
         row_idx = len(table.rows) - 1
+        table.cell(row_idx, 0).text = str(start_no + i)  # 序号, col 0, continuous
         for c, key in enumerate(col_keys):
             val = item.get(key, "")
             if isinstance(val, list):
                 val = "\n".join(f"{j+1}、{x}" for j, x in enumerate(val))
-            table.cell(row_idx, c).text = str(val)
+            table.cell(row_idx, c + 1).text = str(val)   # col_keys -> cols 1..N
 
 
 def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
@@ -106,18 +106,16 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     while len(chunks) > len(proc_pages):
         dup = duplicate_slide(prs, proc_pages[-1])
         proc_pages.append(len(prs.slides) - 1)
+    running_no = 1
     for pi, chunk in enumerate(chunks):
         slide = prs.slides[proc_pages[pi]]
         for sh in slide.shapes:
             if sh.has_table:
-                fill_table(sh.table, chunk, ["事项内容", "进度及责任人", "状态", "完成时间"])
-                for r in range(1, len(sh.table.rows)):
-                    sh.table.cell(r, 0).text = str(r)
+                fill_table(sh.table, chunk, ["事项内容", "进度及责任人", "状态", "完成时间"], start_no=running_no)
+        running_no += len(chunk)
     # 页16 下周计划
     for sh in prs.slides[16].shapes:
         if sh.has_table:
-            fill_table(sh.table, plan_items, ["事项内容", "提出时间", "次周预计完成节点名称", "涉及部门"])
-            for r in range(1, len(sh.table.rows)):
-                sh.table.cell(r, 0).text = str(r)
+            fill_table(sh.table, plan_items, ["事项内容", "提出时间", "次周预计完成节点名称", "涉及部门"], start_no=1)
     prs.save(out_path)
     return out_path

@@ -37,3 +37,14 @@ def test_build_ppt_smoke():
     assert os.path.exists(out)
     prs = Presentation(out)
     assert len(prs.slides) >= 19  # 原始18 + 复制页9'
+
+    # 验证采购表(页12)列对齐: col0=序号, col1=事项内容, col4=完成时间
+    table = None
+    for sh in prs.slides[12].shapes:
+        if sh.has_table:
+            table = sh.table
+            break
+    assert table is not None, "页12 未找到表格"
+    assert table.cell(1, 0).text == "1", f"序号列错误: {table.cell(1, 0).text!r}"
+    assert table.cell(1, 1).text == "测试采购", f"事项内容列错误: {table.cell(1, 1).text!r}"
+    assert table.cell(1, 4).text == "7月9日", f"完成时间列错误: {table.cell(1, 4).text!r}"
