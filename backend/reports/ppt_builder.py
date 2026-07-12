@@ -1,6 +1,38 @@
 import copy
 from pptx import Presentation
 
+_A = "http://schemas.openxmlformats.org/drawingml/2006/main"
+_A_TR = f"{{{_A}}}tr"
+_A_T = f"{{{_A}}}t"
+_A_TCPR = f"{{{_A}}}tcPr"
+_A_B = f"{{{_A}}}b"
+_FILL_LOCALS = {"solidFill", "gradFill", "blipFill", "pattFill", "grpFill"}
+
+
+def _localname(el) -> str:
+    tag = el.tag
+    return tag.rpartition("}")[2] if isinstance(tag, str) and "}" in tag else (tag or "")
+
+
+def _strip_row_styling(tr):
+    """Remove header-originated bold + cell background from a data <a:tr> clone.
+
+    Strips: (a) any fill child of <a:tcPr> (solidFill/gradFill/...), and
+    (b) bold on run props (<a:b/> child or b="1" attribute on rPr/endParaRPr).
+    Cell count/structure is left intact.
+    """
+    for el in tr.iter():
+        local = _localname(el)
+        if local == "tcPr":
+            for child in list(el):
+                if _localname(child) in _FILL_LOCALS:
+                    el.remove(child)
+        elif local in ("rPr", "endParaRPr"):
+            for b in el.findall(_A_B):
+                el.remove(b)
+            if el.get("b") in ("1", "true"):
+                del el.attrib["b"]
+
 
 def _picture_shapes(slide):
     return [s for s in slide.shapes if s.shape_type == 13]  # PICTURE
@@ -38,22 +70,29 @@ def duplicate_slide(prs, index: int):
     return new
 
 
-def _add_row(table):
-    tbl = table._tbl
-    tmpl = tbl.findall(".//{http://schemas.openxmlformats.org/drawingml/2006/main}tr")[-1]
-    new_tr = copy.deepcopy(tmpl)
-    for t in new_tr.iter("{http://schemas.openxmlformats.org/drawingml/2006/main}t"):
+def _add_row(table, template_tr):
+    new_tr = copy.deepcopy(template_tr)
+    for t in new_tr.iter(_A_T):
         t.text = ""
-    tmpl.addnext(new_tr)
+    _strip_row_styling(new_tr)
+    # append after the current last row so order is preserved
+    last_tr = table._tbl.findall(_A_TR)[-1]
+    last_tr.addnext(new_tr)
 
 
 def fill_table(table, items: list, col_keys: list, start_row: int = 1, start_no: int = 1):
+    tbl = table._tbl
+    trs = tbl.findall(_A_TR)
+    # Prefer an existing data-row as the clone template so data rows don't
+    # inherit header styling (bold / gradient fill). Fall back to the header
+    # row; _strip_row_styling removes header bold/fill from each clone.
+    template_tr = trs[start_row] if len(trs) > start_row else trs[0]
     while len(table.rows) > start_row:
         last = len(table.rows) - 1
         tr = table.rows[last]._tr
         tr.getparent().remove(tr)
     for i, item in enumerate(items):
-        _add_row(table)
+        _add_row(table, template_tr)
         row_idx = len(table.rows) - 1
         table.cell(row_idx, 0).text = str(start_no + i)  # 序号, col 0, continuous
         for c, key in enumerate(col_keys):

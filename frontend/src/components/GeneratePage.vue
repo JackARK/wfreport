@@ -3,8 +3,8 @@ import { ref } from 'vue'; import { aiSection, generate, dl } from '../api'
 const props = defineProps(['weekId'])
 const wc = ref(''), ds = ref(''), proc = ref(''), plan = ref(''), links = ref(null)
 const procIn = ref(''), planIn = ref('')
-async function genWC(){ wc.value = (await aiSection('week_compare',{vars:{}})).data.text }
-async function genDaily(){ ds.value = (await aiSection('daily_summary',{vars:{}})).data.text }
+async function genWC(){ wc.value = (await aiSection('week_compare',{week_id:props.weekId})).data.text }
+async function genDaily(){ ds.value = (await aiSection('daily_summary',{week_id:props.weekId})).data.text }
 async function genProc(){ proc.value = JSON.stringify((await aiSection('procurement',{input:procIn.value})).data.items) }
 async function genPlan(){ plan.value = JSON.stringify((await aiSection('next_plan',{input:planIn.value})).data.items) }
 async function doGenerate(){

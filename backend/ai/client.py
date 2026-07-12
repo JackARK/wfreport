@@ -18,6 +18,11 @@ def _fallback(section: str, vars: dict) -> str:
     if section == "week_compare":
         return (f"本周销售额{vars.get('cur_amount')}元，销售毛利{vars.get('cur_profit')}元，"
                 f"销售毛利率{vars.get('cur_margin')}%；较上周销售额{vars.get('amount_delta')}元。")
+    if section == "daily_summary":
+        series = vars.get("daily_series") or ""
+        if series:
+            return f"本周每日销售概况（AI 不可用，占位）：\n{series}"
+        return "（AI 不可用，占位文本）"
     return "（AI 不可用，占位文本）"
 
 
