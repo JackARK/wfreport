@@ -13,18 +13,11 @@ class MetricsBundle:
     new_products: pd.DataFrame
     factory_top5: pd.DataFrame
 
-def aggregate(df: pd.DataFrame, by: list[str]) -> dict:
-    """按 by 聚合(空列表=全表)。返回单组汇总 dict。"""
-    g = df.groupby(by) if by else df
-    销售金额 = g["销售金额"].sum()
-    销售数量 = g["销售数量"].sum()
-    销售毛利 = g["销售毛利"].sum()
-    if by:
-        return pd.DataFrame({
-            "销售金额": 销售金额, "销售数量": 销售数量, "销售毛利": 销售毛利,
-        }).reset_index()
-    # 全表 -> 单值 dict
-    sa, sq, sp = float(销售金额), int(销售数量), float(销售毛利)
+def aggregate(df: pd.DataFrame) -> dict:
+    """全表汇总。返回单组汇总 dict {销售金额, 销售数量, 销售毛利, 销售毛利率}。"""
+    sa = float(df["销售金额"].sum())
+    sq = int(df["销售数量"].sum())
+    sp = float(df["销售毛利"].sum())
     return {"销售金额": sa, "销售数量": sq, "销售毛利": sp, "销售毛利率": sp / sa}
 
 def _agg_dim(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
@@ -34,9 +27,8 @@ def _agg_dim(df: pd.DataFrame, by: list[str]) -> pd.DataFrame:
     return out
 
 def compute_all(df: pd.DataFrame) -> MetricsBundle:
-    total_qty = df["销售数量"].sum()
     # overview
-    ov = aggregate(df, [])
+    ov = aggregate(df)
     overview = {"销售金额": ov["销售金额"], "销售毛利": ov["销售毛利"],
                 "销售毛利率": ov["销售毛利率"], "销售数量": ov["销售数量"]}
     # daily
@@ -57,9 +49,8 @@ def compute_all(df: pd.DataFrame) -> MetricsBundle:
         销售数量=("销售数量", "sum"), 销售金额=("销售金额", "sum"),
         销售毛利=("销售毛利", "sum")).reset_index()
     prod_agg["销售毛利率"] = prod_agg["销售毛利"] / prod_agg["销售金额"]
-    top15_codes = prod_agg.sort_values("销售数量", ascending=False).head(15)[["商品编码", "商品名称"]]
-    product_top15 = prod_agg.merge(top15_codes, on=["商品编码", "商品名称"]).sort_values("销售数量", ascending=False)
-    product_top15_daily = (df[df["商品编码"].isin(top15_codes["商品编码"])]
+    product_top15 = prod_agg.sort_values("销售数量", ascending=False).head(15).reset_index(drop=True)
+    product_top15_daily = (df[df["商品编码"].isin(product_top15["商品编码"])]
                            .groupby(["商品编码", "商品名称", "订单日期"])["销售数量"].sum().reset_index())
     # new products
     new = df[df["是否新品"] == "是"]
