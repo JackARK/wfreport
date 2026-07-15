@@ -1,8 +1,10 @@
 import os
+import zipfile
+import io
 from pathlib import Path
 
 import yaml
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Body
 from fastapi.responses import FileResponse
 
 from backend.ai import client as ai_client, prompts as ai_prompts
@@ -178,3 +180,117 @@ def download(week_id: str, name: str):
     if not target.is_file():
         raise HTTPException(status_code=404)
     return FileResponse(str(target))
+
+
+# ===== Workflow / Workspace endpoints =====
+
+@router.get("/api/workspace/{week_id}")
+def get_workspace(week_id: str):
+    """Combined view for step 3 (preview): returns data + user-entered workspace."""
+    if week_id not in _state:
+        # If not in memory (e.g. backend restart) but exists in SQLite, return workspace-only
+        if not history.week_exists(week_id, _db()):
+            raise HTTPException(404, "请先上传")
+    df, bundle = _state.get(week_id, (None, None))
+    ws = history.load_workspace(week_id, _db())
+    recent = history.get_recent_weeks(3, _db())
+    return {
+        "workspace": ws,
+        "data": web_report.build_report_json(bundle, recent) if bundle else None,
+        "generated": {
+            "xlsx_exists": (OUT_ROOT / week_id / f"{week_id}.xlsx").is_file(),
+            "ppt_exists": (OUT_ROOT / week_id / f"{week_id}.pptx").is_file(),
+            "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
+            "ppt_url": f"/api/download/{week_id}/{week_id}.pptx",
+        },
+    }
+
+
+@router.put("/api/workspace/{week_id}")
+def put_workspace(week_id: str, ws: dict = Body(...)):
+    """Save user-entered content + plan + AI narrative overrides."""
+    if week_id not in _state and not history.week_exists(week_id, _db()):
+        raise HTTPException(404, "请先上传")
+    if not history.week_exists(week_id, _db()):
+        # touch summary row so FK succeeds if raw state lost
+        history.save_week(week_id, _state[week_id][0], _state[week_id][1].overview, _db())
+    saved = history.save_workspace(week_id, ws, _db())
+    return saved
+
+
+@router.post("/api/workspace/{week_id}/build")
+def build_full(week_id: str, payload: dict = Body(default={})):
+    """Step 4 trigger: render PNGs, build xlsx, build pptx using current workspace state."""
+    if week_id not in _state:
+        raise HTTPException(404, "请先上传")
+    df, bundle = _state[week_id]
+    ws = history.load_workspace(week_id, _db())
+
+    recent = history.get_recent_weeks(3, _db())
+    os.makedirs("output", exist_ok=True)
+    week_dir = OUT_ROOT / week_id
+    week_dir.mkdir(parents=True, exist_ok=True)
+    png_dir = week_dir / "png"
+    pngs = render_all_pngs(bundle, recent, str(png_dir))
+
+    week_meta = {"week_id": week_id,
+                 "周起始日": str(df["订单日期"].min().date()),
+                 "周结束日": str(df["订单日期"].max().date())}
+    built_narratives = narratives_mod.build_narratives(bundle, week_meta)
+    overrides = ws.get("narrative_overrides") or {}
+    narratives = {k: (overrides.get(k) or built_narratives.get(k, ""))
+                  for k in ("brand", "brand_share", "product", "new")}
+
+    # ai_texts come from payload (caller asks AI live from step 3) but fall back to persisted content
+    ai_texts_in = payload.get("ai_texts", {}) or {}
+    ai_texts = {
+        "week_compare": ai_texts_in.get("week_compare") or ws.get("content_md", ""),
+        "daily_summary": ai_texts_in.get("daily_summary") or "",
+        "procurement": "",
+        "next_plan": "",
+    }
+
+    # plans come from persisted workspace
+    proc_items = payload.get("procurement_items") or ws.get("procurement_items") or []
+    plan_items = payload.get("plan_items") or ws.get("plan_items") or []
+
+    xlsx = str(week_dir / f"{week_id}.xlsx")
+    pptx = str(week_dir / f"{week_id}.pptx")
+    build_excel(bundle, recent, ai_texts, xlsx)
+    pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
+    build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
+              pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
+
+    return {"ok": True,
+            "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
+            "ppt_url": f"/api/download/{week_id}/{week_id}.pptx"}
+
+
+@router.get("/api/bundle/{week_id}.zip")
+def download_bundle(week_id: str):
+    """Bundle all generated artifacts + raw xlsx copy into a single zip."""
+    if (week_id in ("", ".", "..") or "/" in week_id or "\\" in week_id):
+        raise HTTPException(404)
+    week_dir = (OUT_ROOT / week_id).resolve()
+    try:
+        week_dir.relative_to(OUT_ROOT)
+    except ValueError:
+        raise HTTPException(404)
+    if not week_dir.is_dir():
+        raise HTTPException(404)
+
+    files = []
+    for sub in week_dir.rglob("*"):
+        if sub.is_file():
+            files.append(sub)
+    if not files:
+        raise HTTPException(404, "本周尚未生成任何产物")
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for f in files:
+            arcname = f.name  # basename only (avoid zip-slip)
+            zf.write(f, arcname)
+    buf.seek(0)
+    from fastapi.responses import StreamingResponse
+    return StreamingResponse(buf, media_type="application/zip",
+                             headers={"Content-Disposition": f"attachment; filename={week_id}-bundle.zip"})
