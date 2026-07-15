@@ -5,6 +5,7 @@ import StepFill     from './components/steps/StepFill.vue'
 import StepPreview  from './components/steps/StepPreview.vue'
 import StepExport   from './components/steps/StepExport.vue'
 import SettingsPage from './components/SettingsPage.vue'
+import HistoryPage  from './components/HistoryPage.vue'
 import ToastHost    from './components/ToastHost.vue'
 import WorkflowProgress from './components/WorkflowProgress.vue'
 import Onboarding       from './components/Onboarding.vue'
@@ -20,7 +21,7 @@ function showToast(message, kind = 'info') {
 }
 provide('showToast', showToast)
 
-const view = ref('workflow')   // 'workflow' | 'settings'
+const view = ref('workflow')   // 'workflow' | 'settings' | 'history'
 
 const onbOpen = ref(false)
 const onbStartTab = ref('upload')
@@ -33,8 +34,13 @@ const tabs = [
 ]
 const current = computed(() => tabs.find(t => t.id === ['upload','fill','preview','export'][workspace.step - 1]) || tabs[0])
 
-function openSettings() { view.value = 'settings' }
-function closeSettings() { view.value = 'workflow' }
+function openSettings()   { view.value = 'settings' }
+function closeSettings()  { view.value = 'workflow' }
+function openHistory()    { view.value = 'history' }
+function closeHistory()   { view.value = 'workflow' }
+// When a historical week is opened from the history page, the store
+// already jumped to step 4; just switch the view back to the workflow.
+function onHistoryOpened() { view.value = 'workflow' }
 
 function openOnb(tab = 'upload') {
   onbStartTab.value = tab
@@ -91,6 +97,14 @@ onMounted(async () => {
     </div>
 
     <div class="sidebar-foot">
+      <button class="replay-link" @click="view === 'history' ? closeHistory() : openHistory()" :style="view === 'history' ? { color: 'var(--primary)', background: 'var(--primary-soft)' } : {}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3v18h18"/>
+          <path d="M7 14l3-3 4 4 6-6"/>
+          <path d="M14 9h6v6"/>
+        </svg>
+        {{ view === 'history' ? '↩ 返回工作流' : '📚 历史记录' }}
+      </button>
       <button class="replay-link" @click="openOnb(tabs[workspace.step-1]?.id || 'upload')">
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <circle cx="12" cy="12" r="10"/><polygon points="10 8 16 12 10 16 10 8"/>
@@ -103,7 +117,7 @@ onMounted(async () => {
             <circle cx="12" cy="12" r="3"/>
             <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
           </svg>
-          {{ view === 'workflow' ? 'AI 配置 (Prompts)' : '← 返回工作流' }}
+          {{ view === 'settings' ? '↩ 返回工作流' : 'AI 配置 (Prompts)' }}
         </button>
       </div>
       <div style="margin-top:8px">
@@ -120,9 +134,16 @@ onMounted(async () => {
     <span v-else class="week-pill empty">尚未上传</span>
   </header>
 
-  <header class="topbar" v-else>
+  <header class="topbar" v-else-if="view === 'settings'">
     <h1>AI 配置</h1>
     <span class="sub">/ Prompt 模板</span>
+    <span class="spacer"/>
+    <span class="week-pill empty">侧栏返回工作流</span>
+  </header>
+
+  <header class="topbar" v-else-if="view === 'history'">
+    <h1>历史记录</h1>
+    <span class="sub">/ 所有已持久化的周</span>
     <span class="spacer"/>
     <span class="week-pill empty">侧栏返回工作流</span>
   </header>
@@ -136,6 +157,7 @@ onMounted(async () => {
     <StepExport   v-else-if="view === 'workflow' && workspace.step === 4" :week-id="workspace.weekId"/>
 
     <SettingsPage v-if="view === 'settings'" @close="closeSettings"/>
+    <HistoryPage  v-if="view === 'history'"  @close="closeHistory" @opened="onHistoryOpened"/>
   </main>
 
   <ToastHost :toast="toast"/>

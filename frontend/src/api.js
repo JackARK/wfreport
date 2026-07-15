@@ -19,3 +19,6 @@ export const downloadBundle    = (wid) => base+'/api/bundle/'+wid+'.zip'
 
 // ---- history ----
 export const getHistory        = () => axios.get(base+'/api/history').then(r => r.data)
+export const listHistory       = () => axios.get(base+'/api/history/all').then(r => r.data)
+export const reloadWorkspace   = (wid) => axios.post(base+'/api/workspace/'+wid+'/reload').then(r => r.data)
+export const workspaceExportUrl = (wid) => base+'/api/workspace/'+wid+'/export.json'

@@ -29,6 +29,30 @@ export function resetWorkspace() {
   persist()
 }
 
+// Load a persisted week from the backend into the live workspace store.
+// Used by the History page; the user can then jump to step 4 and
+// re-render the report without re-uploading anything.
+export function loadHistoryWeek(payload) {
+  if (!payload || !payload.week_id) return
+  const ws = payload.workspace || {}
+  workspace.weekId      = payload.week_id
+  workspace.uploadMeta  = payload.uploadMeta || { rows: payload.rows, 周起始日: payload.周起始日, 周结束日: payload.周结束日 }
+  workspace.content            = ws.content || ''
+  workspace.planItems          = ws.plan_items || []
+  workspace.procurementItems   = ws.procurement_items || []
+  workspace.aiTexts            = {
+    week_compare: (ws.narrative_overrides && ws.narrative_overrides.week_compare) || '',
+    daily_summary: (ws.narrative_overrides && ws.narrative_overrides.daily_summary) || '',
+  }
+  // narrative_overrides from backend only contains brand/brand_share/product/new —
+  // merge into our internal map so the step-3 editor + step-4 build pick them up.
+  workspace.narrativeOverrides = Object.assign({}, ws.narrative_overrides || {})
+  // viewing a historical week lands the user on step 4 — the report
+  // can be regenerated or downloaded with zero further input.
+  workspace.step = 4
+  persist()
+}
+
 // Wipe user-entered content only — used after a re-upload of the same week_id
 // so the new data isn't paired with stale plans / AI narratives / form text.
 // Also flushes any in-flight debounced autosave so a queued save doesn't

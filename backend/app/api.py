@@ -64,6 +64,50 @@ def history_api():
     return {"recent": history.get_recent_weeks(3, _db())}
 
 
+@router.get("/api/history/all")
+def history_all():
+    """Every persisted week_id with its workspace summary and output file status.
+    Powers the frontend history page; lets the user re-open a previous week
+    without re-uploading anything."""
+    return {"weeks": history.list_weeks_with_files(_db(), OUT_ROOT)}
+
+
+def _ensure_state(week_id: str):
+    """Rebuild _state for week_id from SQLite if the in-memory copy was lost
+    (e.g. backend restarted). Returns True on success."""
+    if week_id in _state:
+        return True
+    df = history.load_orders_as_df(week_id, _db())
+    if df is None or len(df) == 0:
+        return False
+    bundle = metrics.compute_all(df)
+    _state[week_id] = (df, bundle)
+    return True
+
+
+@router.post("/api/workspace/{week_id}/reload")
+def reload_state(week_id: str):
+    """Reconstruct in-memory state from SQLite weekly_orders. Used after a
+    backend restart (or when the user opens a historical week that hasn't
+    been loaded this session)."""
+    if not history.week_exists(week_id, _db()):
+        raise HTTPException(404, "该周数据未持久化到 SQLite")
+    if not _ensure_state(week_id):
+        raise HTTPException(500, "重算 _state 失败")
+    return {"ok": True, "week_id": week_id, "rows": int(len(_state[week_id][0]))}
+
+
+@router.get("/api/workspace/{week_id}/export.json")
+def export_workspace_json(week_id: str):
+    """Download the saved workspace (content + plans + AI overrides) for a
+    week so users can back up or share their notes outside the app."""
+    ws = history.load_workspace(week_id, _db())
+    from fastapi.responses import JSONResponse
+    return JSONResponse(ws, headers={
+        "Content-Disposition": f"attachment; filename={week_id}-workspace.json"
+    })
+
+
 def _week_compare_vars(payload: dict) -> dict:
     week_id = payload.get("week_id")
     if week_id not in _state:
@@ -188,9 +232,9 @@ def download(week_id: str, name: str):
 def get_workspace(week_id: str):
     """Combined view for step 3 (preview): returns data + user-entered workspace."""
     if week_id not in _state:
-        # If not in memory (e.g. backend restart) but exists in SQLite, return workspace-only
         if not history.week_exists(week_id, _db()):
             raise HTTPException(404, "请先上传")
+        _ensure_state(week_id)
     df, bundle = _state.get(week_id, (None, None))
     ws = history.load_workspace(week_id, _db())
     recent = history.get_recent_weeks(3, _db())
@@ -222,7 +266,10 @@ def put_workspace(week_id: str, ws: dict = Body(...)):
 def build_full(week_id: str, payload: dict = Body(default={})):
     """Step 4 trigger: render PNGs, build xlsx, build pptx using current workspace state."""
     if week_id not in _state:
-        raise HTTPException(404, "请先上传")
+        if history.week_exists(week_id, _db()):
+            _ensure_state(week_id)
+        else:
+            raise HTTPException(404, "请先上传")
     df, bundle = _state[week_id]
     ws = history.load_workspace(week_id, _db())
 

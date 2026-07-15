@@ -92,6 +92,96 @@ def _row_to_summary(row):
     return {"week_id": row[0], "周起始日": row[1], "周结束日": row[2],
             "销售额": row[3], "销售毛利": row[4], "销售毛利率": row[5], "销售数量": row[6]}
 
+
+# ---- history listing & raw-order reload for state recovery ----
+
+def list_weeks_with_files(db_path: str, output_root) -> list:
+    """Every week_id in the DB + a snapshot of its workspace and output files.
+    Used by the UI history page so users can re-open a previous week without
+    re-uploading, and so 0-input re-renders can find the existing xlsx/pptx."""
+    import json as _json
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute("""
+            SELECT s.week_id, s.周起始日, s.周结束日,
+                   s.销售额, s.销售毛利, s.销售毛利率, s.销售数量,
+                   (SELECT COUNT(*) FROM weekly_orders o WHERE o.week_id = s.week_id) AS row_count,
+                   w.content, w.content_md,
+                   w.plan_items_json, w.procurement_items_json,
+                   w.narrative_overrides_json, w.updated_at
+            FROM weekly_summary s
+            LEFT JOIN weekly_workspace w ON w.week_id = s.week_id
+            ORDER BY s.week_id DESC
+        """).fetchall()
+        out = []
+        for r in rows:
+            wid = r[0]
+            try:
+                plan_n = len(_json.loads(r[10] or "[]"))
+                proc_n = len(_json.loads(r[11] or "[]"))
+            except Exception:
+                plan_n = proc_n = 0
+            week_dir = output_root / wid
+            out.append({
+                "week_id": wid,
+                "周起始日": r[1],
+                "周结束日": r[2],
+                "销售额": r[3],
+                "销售毛利": r[4],
+                "销售毛利率": r[5],
+                "销售数量": r[6],
+                "rows": r[7],
+                "workspace_summary": {
+                    "content_chars": len(r[8] or ""),
+                    "plan_items_count": plan_n,
+                    "procurement_items_count": proc_n,
+                    "updated_at": r[13],
+                },
+                "files": {
+                    "xlsx": (week_dir / f"{wid}.xlsx").is_file(),
+                    "pptx": (week_dir / f"{wid}.pptx").is_file(),
+                    "bundle": (week_dir / "png").is_dir() or (week_dir / f"{wid}.xlsx").is_file(),
+                },
+                "urls": {
+                    "xlsx": f"/api/download/{wid}/{wid}.xlsx",
+                    "pptx": f"/api/download/{wid}/{wid}.pptx",
+                    "bundle": f"/api/bundle/{wid}.zip",
+                    "workspace": f"/api/workspace/{wid}/export.json",
+                },
+            })
+        return out
+    finally:
+        conn.close()
+
+
+def load_orders_as_df(week_id: str, db_path: str):
+    """Reconstruct the source DataFrame from weekly_orders so _state can be
+    rebuilt without re-uploading the original xlsx."""
+    import pandas as _pd
+    conn = _connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT 线上订单号,品牌,店铺,平台,订单日期,商品名称,工厂,商品编码,"
+            "成本价,总成本,销售数量,销售金额,销售毛利,销售毛利率,是否新品 "
+            "FROM weekly_orders WHERE week_id=? ORDER BY id", (week_id,)
+        ).fetchall()
+    finally:
+        conn.close()
+    if not rows:
+        return None
+    cols = ["线上订单号","品牌","店铺","平台","订单日期","商品名称","工厂","商品编码",
+            "成本价","总成本","销售数量","销售金额","销售毛利","销售毛利率","是否新品"]
+    df = _pd.DataFrame(rows, columns=cols)
+    df["订单日期"] = _pd.to_datetime(df["订单日期"])
+    # Re-derive 平台 from 店铺 prefix using the same logic as parser.load_excel.
+    try:
+        from backend.core.parser import derive_platform
+        df["平台"] = df["店铺"].astype(str).map(derive_platform)
+    except Exception:
+        df["平台"] = "其他"
+    df["week_id"] = week_id
+    return df
+
 # ---- workspace (user-entered content + plan + AI narrative overrides) ----
 
 def _empty_workspace(week_id: str) -> dict:
