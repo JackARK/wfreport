@@ -6,6 +6,7 @@ const base = 'http://localhost:8000'
 export const upload        = (file) => { const fd = new FormData(); fd.append('file', file); return axios.post(base+'/api/upload', fd) }
 export const preview       = (wid) => axios.post(base+'/api/preview/'+wid)
 export const aiSection     = (section, body) => axios.post(base+'/api/ai/'+section, body)
+export const parseWorkspace = (wid, body) => axios.post(base+'/api/ai/parse_workspace/'+wid, body || {}).then(r => r.data)
 export const getPrompts    = () => axios.get(base+'/api/config/prompts')
 export const putPrompts    = (body) => axios.put(base+'/api/config/prompts', body)
 export const generate      = (wid, body) => axios.post(base+'/api/generate/'+wid, body)

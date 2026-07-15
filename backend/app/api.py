@@ -108,6 +108,51 @@ def export_workspace_json(week_id: str):
     })
 
 
+@router.post("/api/ai/parse_workspace/{week_id}")
+def parse_workspace(week_id: str, payload: dict = Body(default={})):
+    """Read this-week's freeform text + next-week's freeform plan,
+    call the AI twice (procurement parser + next_plan parser), persist the
+    structured rows + the raw text, and return the full workspace.
+
+    Step-2 just shows two textareas; users type whatever prose they want.
+    One click here does the heavy lifting - everything downstream (step 3
+    preview, step 4 build, the PPT/Excel) consumes the parsed rows.
+    """
+    if week_id not in _state:
+        if history.week_exists(week_id, _db()):
+            _ensure_state(week_id)
+        else:
+            raise HTTPException(404, "请先上传")
+
+    content   = (payload.get("content")   or "").strip()
+    plan_text = (payload.get("plan_text") or "").strip()
+
+    # Call AI (with key-fallback to []/placeholder in client.generate_json).
+    proc_items = ai_client.generate_json(
+        "procurement", {"user_input": content}
+    ) if content else []
+
+    plan_items = ai_client.generate_json(
+        "next_plan", {"user_input": plan_text}
+    ) if plan_text else []
+
+    # Persist the raw text + parsed rows in one shot.
+    ws = history.load_workspace(week_id, _db())
+    ws["content"]         = content
+    ws["plan_text"]       = plan_text
+    ws["procurement_items"] = proc_items
+    ws["plan_items"]        = plan_items
+    saved = history.save_workspace(week_id, ws, _db())
+
+    return {
+        "ok": True,
+        "week_id": week_id,
+        "procurement_items_count": len(proc_items),
+        "plan_items_count":        len(plan_items),
+        "workspace": saved,
+    }
+
+
 def _week_compare_vars(payload: dict) -> dict:
     week_id = payload.get("week_id")
     if week_id not in _state:
@@ -270,6 +315,47 @@ def build_full(week_id: str, payload: dict = Body(default={})):
             _ensure_state(week_id)
         else:
             raise HTTPException(404, "请先上传")
+    df, bundle = _state[week_id]
+    ws = history.load_workspace(week_id, _db())
+
+    recent = history.get_recent_weeks(3, _db())
+    os.makedirs("output", exist_ok=True)
+    week_dir = OUT_ROOT / week_id
+    week_dir.mkdir(parents=True, exist_ok=True)
+    png_dir = week_dir / "png"
+    pngs = render_all_pngs(bundle, recent, str(png_dir))
+
+    week_meta = {"week_id": week_id,
+                 "周起始日": str(df["订单日期"].min().date()),
+                 "周结束日": str(df["订单日期"].max().date())}
+    built_narratives = narratives_mod.build_narratives(bundle, week_meta)
+    overrides = ws.get("narrative_overrides") or {}
+    narratives = {k: (overrides.get(k) or built_narratives.get(k, ""))
+                  for k in ("brand", "brand_share", "product", "new")}
+
+    # ai_texts come from payload (caller asks AI live from step 3) but fall back to persisted content
+    ai_texts_in = payload.get("ai_texts", {}) or {}
+    ai_texts = {
+        "week_compare": ai_texts_in.get("week_compare") or ws.get("content_md", ""),
+        "daily_summary": ai_texts_in.get("daily_summary") or "",
+        "procurement": "",
+        "next_plan": "",
+    }
+
+    # plans come from persisted workspace
+    proc_items = payload.get("procurement_items") or ws.get("procurement_items") or []
+    plan_items = payload.get("plan_items") or ws.get("plan_items") or []
+
+    xlsx = str(week_dir / f"{week_id}.xlsx")
+    pptx = str(week_dir / f"{week_id}.pptx")
+    build_excel(bundle, recent, ai_texts, xlsx)
+    pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
+    build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
+              pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
+
+    return {"ok": True,
+            "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
+            "ppt_url": f"/api/download/{week_id}/{week_id}.pptx"}
     df, bundle = _state[week_id]
     ws = history.load_workspace(week_id, _db())
 

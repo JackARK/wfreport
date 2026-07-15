@@ -27,11 +27,19 @@ def init_db(db_path: str):
             week_id TEXT PRIMARY KEY,
             content TEXT DEFAULT '',
             content_md TEXT DEFAULT '',
+            plan_text TEXT DEFAULT '',
             plan_items_json TEXT DEFAULT '[]',
             procurement_items_json TEXT DEFAULT '[]',
             narrative_overrides_json TEXT DEFAULT '{}',
             updated_at TEXT);
         """)
+        # Idempotent migration: older DBs may pre-date plan_text. SQLite ALTER
+        # TABLE fails silently if the column already exists (we catch the error).
+        try:
+            conn.execute("ALTER TABLE weekly_workspace ADD COLUMN plan_text TEXT DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass
         conn.commit()
     finally:
         conn.close()
@@ -106,7 +114,7 @@ def list_weeks_with_files(db_path: str, output_root) -> list:
             SELECT s.week_id, s.周起始日, s.周结束日,
                    s.销售额, s.销售毛利, s.销售毛利率, s.销售数量,
                    (SELECT COUNT(*) FROM weekly_orders o WHERE o.week_id = s.week_id) AS row_count,
-                   w.content, w.content_md,
+                   w.content, w.content_md, w.plan_text,
                    w.plan_items_json, w.procurement_items_json,
                    w.narrative_overrides_json, w.updated_at
             FROM weekly_summary s
@@ -133,9 +141,10 @@ def list_weeks_with_files(db_path: str, output_root) -> list:
                 "rows": r[7],
                 "workspace_summary": {
                     "content_chars": len(r[8] or ""),
+                    "plan_text_chars": len(r[10] or ""),
                     "plan_items_count": plan_n,
                     "procurement_items_count": proc_n,
-                    "updated_at": r[13],
+                    "updated_at": r[14],
                 },
                 "files": {
                     "xlsx": (week_dir / f"{wid}.xlsx").is_file(),
@@ -186,6 +195,7 @@ def load_orders_as_df(week_id: str, db_path: str):
 
 def _empty_workspace(week_id: str) -> dict:
     return {"week_id": week_id, "content": "", "content_md": "",
+            "plan_text": "",
             "plan_items": [], "procurement_items": [],
             "narrative_overrides": {}, "updated_at": None}
 
@@ -195,10 +205,16 @@ def load_workspace(week_id: str, db_path: str) -> dict:
         row = conn.execute("SELECT * FROM weekly_workspace WHERE week_id=?", (week_id,)).fetchone()
         if not row:
             return _empty_workspace(week_id)
+        # Old DBs may not have plan_text column -> default to ''
+        try:
+            plan_text = row[7] if len(row) > 7 else ""
+        except Exception:
+            plan_text = ""
         return {
             "week_id": row[0],
             "content": row[1] or "",
             "content_md": row[2] or "",
+            "plan_text": plan_text or "",
             "plan_items": json.loads(row[3] or "[]"),
             "procurement_items": json.loads(row[4] or "[]"),
             "narrative_overrides": json.loads(row[5] or "{}"),
@@ -212,12 +228,13 @@ def save_workspace(week_id: str, ws: dict, db_path: str) -> dict:
     try:
         cur = conn.cursor()
         cur.execute(
-            """INSERT INTO weekly_workspace(week_id, content, content_md, plan_items_json,
+            """INSERT INTO weekly_workspace(week_id, content, content_md, plan_text, plan_items_json,
                procurement_items_json, narrative_overrides_json, updated_at)
-               VALUES(?,?,?,?,?,?,?)
+               VALUES(?,?,?,?,?,?,?,?)
                ON CONFLICT(week_id) DO UPDATE SET
                  content=excluded.content,
                  content_md=excluded.content_md,
+                 plan_text=excluded.plan_text,
                  plan_items_json=excluded.plan_items_json,
                  procurement_items_json=excluded.procurement_items_json,
                  narrative_overrides_json=excluded.narrative_overrides_json,
@@ -225,6 +242,7 @@ def save_workspace(week_id: str, ws: dict, db_path: str) -> dict:
             (week_id,
              ws.get("content", ""),
              ws.get("content_md", ""),
+             ws.get("plan_text", ""),
              json.dumps(ws.get("plan_items", []), ensure_ascii=False),
              json.dumps(ws.get("procurement_items", []), ensure_ascii=False),
              json.dumps(ws.get("narrative_overrides", {}), ensure_ascii=False),

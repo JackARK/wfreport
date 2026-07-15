@@ -6,9 +6,10 @@ const fresh = () => ({
   step: 1,           // 1=upload, 2=fill, 3=preview, 4=export
   weekId: '',
   uploadMeta: null,  // { rows, 周起始日, 周结束日 }
-  content: '',
-  planItems: [],
-  procurementItems: [],
+  content: '',       // 本周内容 freeform
+  planText: '',      // 下周计划 freeform (new - replaces manual plan table)
+  planItems: [],     // AI-parsed structure
+  procurementItems: [], // AI-parsed structure
   aiTexts: { week_compare: '', daily_summary: '' },
   narrativeOverrides: {},
 })
@@ -38,6 +39,7 @@ export function loadHistoryWeek(payload) {
   workspace.weekId      = payload.week_id
   workspace.uploadMeta  = payload.uploadMeta || { rows: payload.rows, 周起始日: payload.周起始日, 周结束日: payload.周结束日 }
   workspace.content            = ws.content || ''
+  workspace.planText          = ws.plan_text || ''
   workspace.planItems          = ws.plan_items || []
   workspace.procurementItems   = ws.procurement_items || []
   workspace.aiTexts            = {
@@ -114,6 +116,7 @@ export function setWeek(weekId, uploadMeta) {
 }
 
 export function setContent(text) { workspace.content = text; persist() }
+export function setPlanText(text) { workspace.planText = text; persist() }
 export function setPlanItems(arr)  { workspace.planItems = arr;  persist() }
 export function setProcurementItems(arr) { workspace.procurementItems = arr; persist() }
 export function setAiTexts(t)      { Object.assign(workspace.aiTexts, t); persist() }
@@ -126,6 +129,7 @@ function persist() {
       weekId: workspace.weekId,
       uploadMeta: workspace.uploadMeta,
       content: workspace.content,
+      planText: workspace.planText,
       planItems: workspace.planItems,
       procurementItems: workspace.procurementItems,
       aiTexts: workspace.aiTexts,
