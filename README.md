@@ -76,13 +76,15 @@ npm --prefix frontend install
 cp .env.example .env
 ```
 
-编辑 `.env` 填入 MiniMax API Key：
+编辑 `.env` 填入**至少一个** AI provider 的 key。默认 `MiniMax`，也可以使用 **DeepSeek** 或 **Kimi (Moonshot)**——三者的 API 均兼容 OpenAI `/chat/completions`，运行时可在前端下拉框切换。
 
 ```
 MINIMAX_API_KEY=sk-xxxxxxxxxxxxxxxx
+DEEPSEEK_API_KEY=sk-xxxxxxxxxxxxxxxx
+KIMI_API_KEY=sk-xxxxxxxxxxxxxxxx
 ```
 
-未填写时，AI 文案将自动回退到占位文本，不会阻塞流程。
+DeepSeek 的 `deepseek-v4-flash` / `v4-pro` 支持通过 `thinking.type=disabled` 关闭思考模式（前端开关控制，节省 token）；Kimi 同样支持思考模式控制。未填写时，AI 文案将自动回退到占位文本，不会阻塞流程。
 
 ### 4.2 YAML 配置（可选自定义）
 

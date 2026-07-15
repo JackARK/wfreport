@@ -126,14 +126,18 @@ def parse_workspace(week_id: str, payload: dict = Body(default={})):
 
     content   = (payload.get("content")   or "").strip()
     plan_text = (payload.get("plan_text") or "").strip()
+    provider  = (payload.get("provider") or "").strip() or None
+    thinking  = (payload.get("thinking") or "").strip() or None
 
     # Call AI (with key-fallback to []/placeholder in client.generate_json).
     proc_items = ai_client.generate_json(
-        "procurement", {"user_input": content}
+        "procurement", {"user_input": content},
+        provider=provider, thinking=thinking,
     ) if content else []
 
     plan_items = ai_client.generate_json(
-        "next_plan", {"user_input": plan_text}
+        "next_plan", {"user_input": plan_text},
+        provider=provider, thinking=thinking,
     ) if plan_text else []
 
     # Persist the raw text + parsed rows in one shot.
@@ -202,15 +206,29 @@ def _daily_summary_vars(payload: dict) -> dict:
 
 @router.post("/api/ai/{section}")
 def ai_section(section: str, payload: dict):
+    provider = (payload.get("provider") or "").strip() or None
+    thinking = (payload.get("thinking") or "").strip() or None
     if section in ("procurement", "next_plan"):
-        items = ai_client.generate_json(section, {"user_input": payload.get("input", "")})
+        items = ai_client.generate_json(
+            section, {"user_input": payload.get("input", "")},
+            provider=provider, thinking=thinking,
+        )
         return {"items": items}
     if section == "week_compare":
-        return {"text": ai_client.generate_section("week_compare", _week_compare_vars(payload))}
+        return {"text": ai_client.generate_section("week_compare", _week_compare_vars(payload), provider=provider, thinking=thinking)}
     if section == "daily_summary":
-        return {"text": ai_client.generate_section("daily_summary", _daily_summary_vars(payload))}
-    text = ai_client.generate_section(section, payload.get("vars", {}))
+        return {"text": ai_client.generate_section("daily_summary", _daily_summary_vars(payload), provider=provider, thinking=thinking)}
+    text = ai_client.generate_section(section, payload.get("vars", {}), provider=provider, thinking=thinking)
     return {"text": text}
+
+
+@router.get("/api/ai/providers")
+def ai_providers():
+    """List configured AI providers for the UI dropdown.
+    Each entry exposes only safe metadata (no secrets); has_key tells the
+    UI whether to mark the provider as available / warn the user.
+    """
+    return {"providers": ai_client.list_providers()}
 
 
 @router.get("/api/config/prompts")

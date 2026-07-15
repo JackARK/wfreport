@@ -23,3 +23,6 @@ export const getHistory        = () => axios.get(base+'/api/history').then(r => 
 export const listHistory       = () => axios.get(base+'/api/history/all').then(r => r.data)
 export const reloadWorkspace   = (wid) => axios.post(base+'/api/workspace/'+wid+'/reload').then(r => r.data)
 export const workspaceExportUrl = (wid) => base+'/api/workspace/'+wid+'/export.json'
+
+// ---- AI providers (configurable, multi-vendor) ----
+export const listProviders    = () => axios.get(base+'/api/ai/providers').then(r => r.data)

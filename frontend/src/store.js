@@ -1,6 +1,7 @@
 import { reactive, watch } from 'vue'
 
 const STORAGE_KEY = 'wfreport.workspace'
+const AI_PREFS_KEY = 'wfreport.aiPrefs'
 
 const fresh = () => ({
   step: 1,           // 1=upload, 2=fill, 3=preview, 4=export
@@ -121,6 +122,66 @@ export function setPlanItems(arr)  { workspace.planItems = arr;  persist() }
 export function setProcurementItems(arr) { workspace.procurementItems = arr; persist() }
 export function setAiTexts(t)      { Object.assign(workspace.aiTexts, t); persist() }
 export function setNarrativeOverride(k, v) { workspace.narrativeOverrides[k] = v; persist() }
+
+// ---- AI provider prefs (separate localStorage so the choice persists
+//      across week resets; per-session only - not part of the report data) ----
+
+export const aiPrefs = reactive(_loadAiPrefs())
+
+function _loadAiPrefs() {
+  try {
+    const raw = localStorage.getItem(AI_PREFS_KEY)
+    if (raw) return { provider: 'minimax', thinking: 'disabled', ...JSON.parse(raw) }
+  } catch {}
+  return { provider: 'minimax', thinking: 'disabled' }
+}
+
+function _persistAiPrefs() {
+  try { localStorage.setItem(AI_PREFS_KEY, JSON.stringify({
+    provider: aiPrefs.provider,
+    thinking: aiPrefs.thinking,
+  })) } catch {}
+}
+
+export function setAiProvider(provider) {
+  aiPrefs.provider = provider
+  // Reset thinking on provider change so the toggle never lands on an
+  // unsupported state (e.g. switching to minimax with thinking=enabled).
+  if (!providerSupportsThinking(provider)) aiPrefs.thinking = 'disabled'
+  _persistAiPrefs()
+}
+
+export function setAiThinking(thinking) {
+  aiPrefs.thinking = thinking
+  _persistAiPrefs()
+}
+
+// Cheap client-side cache of providers fetched from /api/ai/providers;
+// keeps StepFill's toggle in sync with backend capabilities without an
+// extra round-trip per keystroke.
+let _providersCache = null
+export async function loadProviders(force = false) {
+  if (!force && _providersCache) return _providersCache
+  try {
+    const { listProviders } = await import('./api.js')
+    const data = await listProviders()
+    _providersCache = data.providers || []
+  } catch {
+    _providersCache = []
+  }
+  return _providersCache
+}
+
+export function providerSupportsThinking(providerId) {
+  if (!_providersCache) return false
+  const p = _providersCache.find(x => x.id === providerId)
+  return !!(p && p.supports_thinking)
+}
+
+export function getCachedProvider(providerId) {
+  if (!_providersCache) return null
+  return _providersCache.find(x => x.id === providerId) || null
+}
 
 function persist() {
   try {

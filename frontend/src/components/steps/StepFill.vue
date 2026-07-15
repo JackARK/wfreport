@@ -1,8 +1,11 @@
 <script setup>
 import { ref, computed, watch, onMounted, inject } from 'vue'
 import { parseWorkspace, putWorkspace } from '../../api'
-import { workspace, setContent, setPlanText, setPlanItems, setProcurementItems,
-         gotoStep, markStepDone, resetWorkspace, scheduleAutosave } from '../../store'
+import {
+  workspace, setContent, setPlanText, setPlanItems, setProcurementItems,
+  gotoStep, markStepDone, resetWorkspace, scheduleAutosave,
+  aiPrefs, setAiProvider, setAiThinking, loadProviders, getCachedProvider,
+} from '../../store'
 
 const emit = defineEmits([])
 const showToast = inject('showToast')
@@ -13,6 +16,31 @@ const tab = ref('thisWeek')   // 'thisWeek' | 'nextWeek'
 const aiBusy = ref(false)
 const showStructured = ref(false)
 const lastParsedAt = ref(null)   // last successful parse
+
+// ---- AI provider dropdown ----
+const providers = ref([])
+onMounted(async () => {
+  providers.value = await loadProviders()
+  // If the persisted provider isn't installed (no key), fall back to the
+  // first one that does have a key so users don't see a broken AI button.
+  const cur = getCachedProvider(aiPrefs.provider)
+  if (!cur || !cur.has_key) {
+    const ready = providers.value.find(p => p.has_key)
+    if (ready) setAiProvider(ready.id)
+  }
+})
+const currentProvider = computed(() =>
+  providers.value.find(p => p.id === aiPrefs.provider) || null
+)
+const showThinking = computed(() =>
+  currentProvider.value?.supports_thinking ?? false
+)
+function onProviderChange(e) {
+  setAiProvider(e.target.value)
+}
+function onThinkingChange(e) {
+  setAiThinking(e.target.value)
+}
 
 function save() {
   if (!props.weekId) return
@@ -39,6 +67,8 @@ async function aiParse() {
     const r = await parseWorkspace(props.weekId, {
       content: workspace.content,
       plan_text: workspace.planText,
+      provider: aiPrefs.provider,
+      thinking: showThinking.value ? aiPrefs.thinking : null,
     })
     if (Array.isArray(r.workspace?.procurement_items)) setProcurementItems(r.workspace.procurement_items)
     if (Array.isArray(r.workspace?.plan_items))        setPlanItems(r.workspace.plan_items)
@@ -52,7 +82,8 @@ async function aiParse() {
     }
     showStructured.value = true
   } catch (err) {
-    showToast?.('AI 解析失败: ' + (err?.response?.data?.detail || err.message), 'error')
+    const detail = err?.response?.data?.detail || err.message
+    showToast?.('AI 解析失败: ' + detail + (currentProvider.value && !currentProvider.value.has_key ? ` · 当前 ${currentProvider.value.name} 未配置 API Key` : ''), 'error')
   } finally {
     aiBusy.value = false
   }
@@ -178,7 +209,20 @@ const parsedAgo = computed(() => fmtAgo(lastParsedAt.value))
             <span>右:下周重点(含责任部门)</span>
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2" style="flex-wrap: wrap; justify-content: flex-end">
+          <div class="ai-provider-pill" :title="currentProvider?.has_key ? '' : '该 provider 尚未配置 API Key · 将回退到占位文本'">
+            <span class="muted" style="font-size:11.5px">AI</span>
+            <select class="select-mini" :value="aiPrefs.provider" @change="onProviderChange" :disabled="providers.length === 0">
+              <option v-for="p in providers" :key="p.id" :value="p.id" :disabled="!p.has_key">
+                {{ p.name }}{{ p.has_key ? '' : ' (缺 key)' }}
+              </option>
+            </select>
+          </div>
+          <div v-if="showThinking" class="ai-thinking-toggle" :title="aiPrefs.thinking === 'disabled' ? '当前关闭思考模式 · 输出更省 token' : '当前开启思考模式 · 推理更深'">
+            <span class="muted" style="font-size:11.5px">思考</span>
+            <button class="tg" :class="{ on: aiPrefs.thinking === 'enabled' }"  @click="setAiThinking('enabled')">开</button>
+            <button class="tg" :class="{ on: aiPrefs.thinking === 'disabled' }" @click="setAiThinking('disabled')">关</button>
+          </div>
           <button class="btn btn-secondary btn-sm" @click="tab='thisWeek'" :class="{ on: tab==='thisWeek' }">本周</button>
           <button class="btn btn-secondary btn-sm" @click="tab='nextWeek'" :class="{ on: tab==='nextWeek' }">下周</button>
           <button class="btn btn-ghost btn-sm" @click="loadSample">载入示例</button>
@@ -313,4 +357,39 @@ const parsedAgo = computed(() => fmtAgo(lastParsedAt.value))
 
 <style scoped>
 .btn.on { background: var(--primary-soft); color: var(--primary); border-color: var(--primary-soft); }
+
+.ai-provider-pill,
+.ai-thinking-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px;
+  background: var(--bg-soft, rgba(0,0,0,.03));
+  border: 1px solid var(--border, rgba(0,0,0,.08));
+  border-radius: 999px;
+  font-size: 12px;
+}
+.select-mini {
+  border: 0;
+  background: transparent;
+  outline: none;
+  font-size: 12.5px;
+  color: inherit;
+  font-weight: 600;
+  padding-right: 4px;
+}
+.ai-thinking-toggle .tg {
+  border: 0;
+  background: transparent;
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 999px;
+  color: var(--muted, #888);
+  cursor: pointer;
+}
+.ai-thinking-toggle .tg.on {
+  background: var(--primary, #5b6cff);
+  color: #fff;
+}
 </style>
