@@ -44,12 +44,12 @@ def save_week(week_id: str, df: pd.DataFrame, overview: dict, db_path: str):
         cur.execute("SELECT content, content_md, plan_items_json, procurement_items_json, narrative_overrides_json "
                     "FROM weekly_workspace WHERE week_id=?", (week_id,))
         ws_row = cur.fetchone()
+        # weekly_workspace has no FK to weekly_summary in our schema, so it must
+        # be deleted explicitly before the summary re-insert below or we'll hit
+        # a UNIQUE constraint failure on week_id.
+        cur.execute("DELETE FROM weekly_workspace WHERE week_id=?", (week_id,))
         cur.execute("DELETE FROM weekly_orders WHERE week_id=?", (week_id,))
         cur.execute("DELETE FROM weekly_summary WHERE week_id=?", (week_id,))
-        # re-add workspace row if it was preserved... actually CASCADE removed it; if user
-        # already had content we wanted to keep, that's lost. Simpler: keep workspace by
-        # saving it before delete and restoring after.
-        # Below we always restore after insert (workspace table accepts absent row, FK satisfied).
         start, end = df["订单日期"].min(), df["订单日期"].max()
         cur.execute("INSERT INTO weekly_summary VALUES(?,?,?,?,?,?,?)", (
             week_id, str(start.date()), str(end.date()),
