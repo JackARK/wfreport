@@ -124,7 +124,7 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     replace_picture(S[8], 0, png_paths["platform"])
     # 页9 产品
     set_text(S[9], "文本框 5", narratives.get("product", ""))
-    replace_picture(S[9], 0, png_paths["product_combo"])
+    replace_picture(S[9], 0, png_paths["product_horizontal"])
     # 复制页9 为 9' 放新品
     new9 = duplicate_slide(prs, 9)
     for sh in new9.shapes:

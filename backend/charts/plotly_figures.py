@@ -99,18 +99,112 @@ def fig_product_heatmap(b) -> go.Figure:
     return _heatmap(b.product_top15_daily, "TOP15 产品每日销售数量", "商品名称")
 
 def fig_product_combo(b) -> go.Figure:
-    d = b.product_top15
-    names = d["商品名称"].where(d["商品名称"].str.len() <= 10, d["商品名称"].str[:10] + "…")
-    fig = make_subplots(specs=[[{"secondary_y": True}]])
-    fig.add_trace(go.Bar(x=names, y=d["销售数量"], name="数量",
-                         text=d["销售数量"].tolist(), textposition="outside",
-                         marker_color=_PALETTE["blue"]), secondary_y=False)
-    fig.add_trace(go.Scatter(x=names, y=d["销售毛利率"], name="毛利率",
-                             text=[_pct(v) for v in d["销售毛利率"]], textposition="top center",
-                             mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
-                  secondary_y=True)
-    fig.update_layout(title="TOP15 产品 销量与毛利率", yaxis=dict(title="数量"),
-                      yaxis2=dict(title="毛利率", tickformat=".1%"), xaxis_tickangle=-30)
+    """Deprecated: kept as alias for fig_product_horizontal so old code paths
+    don't break, but new callers should use fig_product_horizontal + the data
+    table view in the UI. See fig_product_horizontal for the redesigned chart."""
+    return fig_product_horizontal(b)
+
+
+def fig_product_horizontal(b) -> go.Figure:
+    """Horizontal bar chart of TOP products by qty. Margin is encoded as bar
+    color (red < 45% < yellow < 55% < green) and printed next to each bar so
+    no numeric labels collide with the X axis. Product names live on the Y
+    axis - never truncated, never rotated."""
+    d = b.product_top15.sort_values("销售数量", ascending=True)  # ascending so biggest sits on top
+    n = len(d)
+    title = f"TOP{n} 产品 销量与毛利率" if n > 0 else "无产品数据"
+
+    # Margin → color. Diverging 3-color scale around 50%.
+    margins = d["销售毛利率"].astype(float)
+    bar_colors = []
+    for m in margins:
+        if m < 0.45:        bar_colors.append(_PALETTE["red"])
+        elif m < 0.50:      bar_colors.append(_PALETTE["orange"])
+        elif m < 0.55:      bar_colors.append("#84cc16")   # lime
+        else:               bar_colors.append(_PALETTE["green"])
+
+    # Combined label inside each bar: "qty件 · margin%" — single text per bar
+    # so we don't fight two label positions for the same horizontal real estate.
+    qty_text = [f"{int(v)}件 · {_pct(m)}" for v, m in zip(d["销售数量"], margins)]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=d["商品名称"],
+        x=d["销售数量"],
+        orientation="h",
+        marker=dict(color=bar_colors, line=dict(color="rgba(0,0,0,.15)", width=0.5)),
+        text=qty_text,
+        textposition="inside",
+        insidetextanchor="end",
+        textfont=dict(color="white", size=11, family="Arial"),
+        cliponaxis=False,
+        hovertemplate="<b>%{y}</b><br>销量: %{x}件<br>毛利率: %{customdata}<extra></extra>",
+        customdata=[_pct(m) for m in margins],
+        name="销量",
+    ))
+    fig.update_layout(
+        title=title,
+        xaxis=dict(title="销售数量(件)", rangemode="tozero"),
+        yaxis=dict(title="", automargin=True),
+        margin=dict(l=10, r=20, t=70, b=40),
+        height=max(420, 38 * n + 130),
+        showlegend=False,
+        plot_bgcolor="rgba(0,0,0,0)",
+    )
+
+    # Top-right legend explaining the color scale.
+    fig.add_annotation(
+        xref="paper", yref="paper",
+        x=0.99, y=1.08, xanchor="right", yanchor="bottom",
+        text="<span style='color:#ef4444'>●</span> &lt;45% &nbsp;&nbsp; "
+             "<span style='color:#f59e0b'>●</span> 45–50% &nbsp;&nbsp; "
+             "<span style='color:#84cc16'>●</span> 50–55% &nbsp;&nbsp; "
+             "<span style='color:#10b981'>●</span> ≥55%",
+        showarrow=False, font=dict(size=10), align="right",
+    )
+    return fig
+
+
+def fig_product_table(b) -> go.Figure:
+    """Plain plotly Table view of the TOP product list — works as a printable
+    data view that pairs with fig_product_horizontal in the UI. Returns a
+    styled table (sortable-looking headers + alternating row shading)."""
+    d = b.product_top15.reset_index(drop=True)
+    n = len(d)
+    title = f"TOP{n} 产品明细" if n > 0 else "无产品数据"
+
+    # alternating row colors
+    row_colors = ["#f8fafc" if i % 2 == 0 else "#ffffff" for i in range(n)]
+
+    fig = go.Figure(data=[go.Table(
+        columnwidth=[56, 220, 110, 110, 110, 110],
+        header=dict(
+            values=["#", "商品名称", "销售数量", "销售额(元)", "销售毛利(元)", "销售毛利率"],
+            fill_color="#1f2937",
+            font=dict(color="white", size=12),
+            align=["center", "left", "right", "right", "right", "right"],
+            height=34,
+        ),
+        cells=dict(
+            values=[
+                list(range(1, n + 1)),
+                d["商品名称"].tolist(),
+                [f"{int(v):,}" for v in d["销售数量"]],
+                [_wan(v) for v in d["销售金额"]],
+                [_wan(v) for v in d["销售毛利"]],
+                [_pct(v) for v in d["销售毛利率"]],
+            ],
+            fill_color=[row_colors] * 6,
+            font=dict(size=11, color="#111827"),
+            align=["center", "left", "right", "right", "right", "right"],
+            height=26,
+        ),
+    )])
+    fig.update_layout(
+        title=title,
+        margin=dict(l=10, r=10, t=50, b=10),
+        height=max(360, 30 * n + 80),
+    )
     return fig
 
 def fig_new_products(b) -> go.Figure:

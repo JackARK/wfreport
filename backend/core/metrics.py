@@ -44,14 +44,17 @@ def compute_all(df: pd.DataFrame) -> MetricsBundle:
     top15_shops = shop_qty.head(15).index.tolist()
     shop_top15_daily = (df[df["店铺"].isin(top15_shops)]
                         .groupby(["店铺", "订单日期"])["销售数量"].sum().reset_index())
-    # product TOP15 (by qty); 用 商品编码 聚合，附带 商品名称
-    prod_agg = df.groupby(["商品编码", "商品名称"]).agg(
+    # product TOP15 (by qty); 按 商品名称 聚合 — 同一产品名下的多个 SKU
+    # (颜色/尺码等不同商品编码) 合并为一个产品行,图表 / 周报才能呈现
+    # 真正的「产品 TOP」,而不是同款不同色被切成几行后被 Plotly 当作
+    # 同一根柱子(同名 collapse)导致 5+ 根柱子消失的问题.
+    prod_agg = df.groupby("商品名称").agg(
         销售数量=("销售数量", "sum"), 销售金额=("销售金额", "sum"),
         销售毛利=("销售毛利", "sum")).reset_index()
     prod_agg["销售毛利率"] = prod_agg["销售毛利"] / prod_agg["销售金额"]
     product_top15 = prod_agg.sort_values("销售数量", ascending=False).head(15).reset_index(drop=True)
-    product_top15_daily = (df[df["商品编码"].isin(product_top15["商品编码"])]
-                           .groupby(["商品编码", "商品名称", "订单日期"])["销售数量"].sum().reset_index())
+    product_top15_daily = (df[df["商品名称"].isin(product_top15["商品名称"])]
+                           .groupby(["商品名称", "订单日期"])["销售数量"].sum().reset_index())
     # new products
     new = df[df["是否新品"] == "是"]
     if len(new) > 0:

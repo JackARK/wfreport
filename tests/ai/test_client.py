@@ -1,8 +1,21 @@
 import json
 from unittest import mock
 
-from backend.ai.client import generate_section, generate_json, _fallback, call_ai
+import pytest
 
+from backend.ai import client
+from backend.ai.client import (
+    _build_body,
+    _resolve_provider,
+    call_ai,
+    generate_json,
+    generate_section,
+    list_providers,
+    _fallback,
+)
+
+
+# ---------- existing fallback / smoke tests (kept) ----------
 
 def test_fallback_when_no_key(monkeypatch):
     monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
@@ -32,11 +45,8 @@ def test_fallback_generic_section():
 
 def test_call_ai_raises_when_no_key(monkeypatch):
     monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
-    try:
+    with pytest.raises(RuntimeError):
         call_ai([{"role": "system", "content": "x"}, {"role": "user", "content": "y"}])
-        assert False, "should have raised"
-    except RuntimeError:
-        pass
 
 
 def test_generate_section_uses_ai_on_success(monkeypatch):
@@ -55,3 +65,143 @@ def test_generate_json_parses_on_success(monkeypatch):
     with mock.patch("backend.ai.client.call_ai", return_value=json.dumps(payload)):
         out = generate_json("procurement", {"user_input": "测试"})
     assert out == payload
+
+
+# ---------- multi-provider resolution ----------
+
+def test_resolve_provider_default(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "abc")
+    p = _resolve_provider()
+    assert p["provider_id"] == "minimax"
+    assert p["api_key"] == "abc"
+    assert p["base_url"] == "https://api.minimaxi.com/v1"
+    assert p["supports_thinking"] is False
+
+
+def test_resolve_provider_named(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    p = _resolve_provider("deepseek")
+    assert p["provider_id"] == "deepseek"
+    assert p["api_key"] == "ds-key"
+    assert p["base_url"] == "https://api.deepseek.com"
+    assert p["supports_thinking"] is True
+    assert p["thinking_disabled_body_patch"] == {"thinking": {"type": "disabled"}}
+
+
+def test_resolve_provider_kimi(monkeypatch):
+    monkeypatch.setenv("KIMI_API_KEY", "k-key")
+    p = _resolve_provider("kimi")
+    assert p["provider_id"] == "kimi"
+    assert p["api_key"] == "k-key"
+    assert p["base_url"] == "https://api.moonshot.cn/v1"
+    assert p["supports_thinking"] is True
+    assert p["model"] == "kimi-k2.6"
+
+
+def test_resolve_provider_unknown_falls_back(monkeypatch):
+    monkeypatch.setenv("MINIMAX_API_KEY", "abc")
+    p = _resolve_provider("nope")
+    # falls back to the YAML default (minimax)
+    assert p["provider_id"] == "minimax"
+
+
+def test_resolve_provider_no_key_returns_none(monkeypatch):
+    monkeypatch.delenv("DEEPSEEK_API_KEY", raising=False)
+    p = _resolve_provider("deepseek")
+    assert p["api_key"] is None
+
+
+def test_list_providers_marks_active_and_has_key(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds")
+    monkeypatch.delenv("KIMI_API_KEY", raising=False)
+    monkeypatch.delenv("MINIMAX_API_KEY", raising=False)
+    providers = list_providers()
+    by_id = {p["id"]: p for p in providers}
+    assert set(by_id.keys()) >= {"minimax", "deepseek", "kimi"}
+    assert by_id["deepseek"]["has_key"] is True
+    assert by_id["kimi"]["has_key"] is False
+    assert by_id["minimax"]["has_key"] is False
+    assert by_id["minimax"]["is_active"] is True
+    assert by_id["deepseek"]["supports_thinking"] is True
+
+
+# ---------- _build_body (thinking toggle) ----------
+
+def _ds():
+    return _resolve_provider("deepseek")
+
+
+def test_build_body_no_thinking_when_provider_lacks_support():
+    p = _resolve_provider("minimax")
+    body = _build_body(p, [{"role": "user", "content": "x"}], thinking="disabled")
+    assert "thinking" not in body
+    assert body["temperature"] == 0.6
+
+
+def test_build_body_disabled_patches_thinking_field():
+    p = _ds()
+    body = _build_body(p, [{"role": "user", "content": "x"}], thinking="disabled")
+    assert body["thinking"] == {"type": "disabled"}
+    # DeepSeek ignores temperature when thinking is on; we explicitly disable
+    # it, so temperature is now meaningful - confirm it lands in the body.
+    assert body["temperature"] == 0.6
+
+
+def test_build_body_enabled_omits_temperature_for_deepseek():
+    p = _ds()
+    body = _build_body(p, [{"role": "user", "content": "x"}], thinking="enabled")
+    assert "thinking" not in body  # DeepSeek default IS enabled; no patch needed
+    assert "temperature" not in body  # ignored in thinking mode anyway
+
+
+def test_build_body_none_is_noop():
+    p = _ds()
+    body = _build_body(p, [{"role": "user", "content": "x"}], thinking=None)
+    assert "thinking" not in body
+    assert "temperature" not in body
+
+
+# ---------- call_ai end-to-end (httpx mocked) ----------
+
+def test_call_ai_uses_named_provider_base_url_and_key(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    captured = {}
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        captured["url"] = url
+        captured["headers"] = headers
+        captured["json"] = json
+        m = mock.Mock()
+        m.raise_for_status = lambda: None
+        m.json.return_value = {"choices": [{"message": {"content": "ok"}}]}
+        return m
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    out = call_ai([{"role": "user", "content": "hi"}], provider="deepseek", thinking="disabled")
+    assert out == "ok"
+    assert captured["url"] == "https://api.deepseek.com/chat/completions"
+    assert captured["headers"]["Authorization"] == "Bearer ds-key"
+    assert captured["json"]["model"] == "deepseek-v4-flash"
+    assert captured["json"]["thinking"] == {"type": "disabled"}
+
+
+def test_generate_section_forwards_provider_and_thinking(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    with mock.patch("backend.ai.client.call_ai", return_value="x<think>hidden</think>\n**bold** text") as m:
+        out = generate_section("week_compare", {"cur_amount": "1", "cur_profit": "1", "cur_margin": "1",
+            "prev_amount": "1", "prev_profit": "1", "prev_margin": "1", "amount_delta": "0",
+            "amount_delta_rate": "0", "profit_delta": "0", "profit_delta_rate": "0", "margin_delta_pct": "0"},
+            provider="deepseek", thinking="disabled")
+    assert "hidden" not in out
+    assert "bold" in out
+    assert m.call_args.kwargs["provider"] == "deepseek"
+    assert m.call_args.kwargs["thinking"] == "disabled"
+
+
+def test_generate_json_forwards_provider_and_thinking(monkeypatch):
+    monkeypatch.setenv("DEEPSEEK_API_KEY", "ds-key")
+    with mock.patch("backend.ai.client.call_ai", return_value=json.dumps([{"事项内容": "ok"}])) as m:
+        out = generate_json("procurement", {"user_input": "x"}, provider="deepseek", thinking="disabled")
+    assert out == [{"事项内容": "ok"}]
+    assert m.call_args.kwargs["provider"] == "deepseek"
+    assert m.call_args.kwargs["thinking"] == "disabled"
