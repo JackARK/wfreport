@@ -1,7 +1,7 @@
 <script setup>
 import { ref, watch, onMounted, inject } from 'vue'
 import { aiSection, getWorkspace, putWorkspace } from '../../api'
-import { workspace, setPlanItems, setProcurementItems, setContent, gotoStep, markStepDone } from '../../store'
+import { workspace, setPlanItems, setProcurementItems, setContent, gotoStep, markStepDone, resetWorkspace, scheduleAutosave } from '../../store'
 
 const showToast = inject('showToast')
 const props = defineProps({ weekId: String })
@@ -66,25 +66,18 @@ async function gen(kind) {
   }
 }
 
-// ---- autosave (debounced) ----
-let saveTimer = null
-function scheduleSave() {
-  clearTimeout(saveTimer)
-  saveTimer = setTimeout(save, 800)
-}
-async function save() {
+// ---- autosave (debounced, shared with store) ----
+function save() {
   if (!props.weekId) return
-  try {
-    await putWorkspace(props.weekId, {
-      content: workspace.content,
-      plan_items: workspace.planItems,
-      procurement_items: workspace.procurementItems,
-    })
-  } catch (e) { /* swallow - next save will retry */ }
+  return putWorkspace(props.weekId, {
+    content: workspace.content,
+    plan_items: workspace.planItems,
+    procurement_items: workspace.procurementItems,
+  }).catch(() => { /* swallow - next save will retry */ })
 }
-watch(() => workspace.content, () => scheduleSave())
-watch(() => workspace.planItems, () => scheduleSave(), { deep: true })
-watch(() => workspace.procurementItems, () => scheduleSave(), { deep: true })
+watch(() => workspace.content, () => scheduleAutosave(save))
+watch(() => workspace.planItems, () => scheduleAutosave(save), { deep: true })
+watch(() => workspace.procurementItems, () => scheduleAutosave(save), { deep: true })
 
 // ---- content (本周工作笔记) ----
 const charCount = ref(0)
@@ -122,6 +115,13 @@ function goForward() {
   if (!canForward()) { showToast?.('请至少在任意一项填入内容', 'error'); return }
   save()
   markStepDone(2); gotoStep(3)
+}
+
+function restartFromScratch() {
+  if (!confirm('重新开始会清空整个工作流 (上传数据 + 工作内容 + 计划 + AI 文案) · 回到第 1 步上传。\n\n确定?')) return
+  resetWorkspace()
+  gotoStep(1)
+  showToast?.('已重新开始 · 回到第 1 步', 'info')
 }
 </script>
 
@@ -268,6 +268,7 @@ function goForward() {
         请至少在一处填写内容,才能进入预览。可以是工作要点、采购行或计划行中的任意一项。
       </template>
     </div>
+    <button class="btn btn-ghost" @click="restartFromScratch" title="清空整个工作流并回到第 1 步">↻ 重新开始</button>
     <button class="btn btn-secondary" @click="gotoStep(1)">返回 上传</button>
     <button class="btn btn-primary btn-lg" :disabled="!canForward()" @click="goForward">
       下一步: 生成预览

@@ -40,9 +40,10 @@ function bundleHref() { return downloadBundle(props.weekId) }
 function xlsxHref()   { return dl(props.weekId, props.weekId + '.xlsx') }
 function pptHref()    { return dl(props.weekId, props.weekId + '.pptx') }
 
-function startOver() {
+function restartFromScratch() {
+  if (!confirm('重新开始会清空整个工作流 (上传数据 + 工作内容 + 计划 + AI 文案 + 已生成的报告) · 回到第 1 步上传。\n\n确定?')) return
   resetWorkspace()
-  showToast?.('已重置,可开始下一周', 'info')
+  showToast?.('已重新开始 · 回到第 1 步', 'info')
   gotoStep(1)
 }
 
@@ -153,8 +154,9 @@ const stepsDone = computed(() => ({
 
   <div class="continue-bar">
     <div class="hint">完成 · 一键打包可发给老板 / 团队。</div>
+    <button class="btn btn-ghost" @click="restartFromScratch" title="清空整个工作流并回到第 1 步">↻ 重新开始</button>
     <button class="btn btn-secondary" @click="gotoStep(3)">返回 预览</button>
-    <button class="btn btn-primary" @click="startOver">开始下一周</button>
+    <button class="btn btn-primary" @click="gotoStep(1)">开始新一周</button>
   </div>
 </template>
 

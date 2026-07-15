@@ -29,6 +29,50 @@ export function resetWorkspace() {
   persist()
 }
 
+// Wipe user-entered content only — used after a re-upload of the same week_id
+// so the new data isn't paired with stale plans / AI narratives / form text.
+// Also flushes any in-flight debounced autosave so a queued save doesn't
+// re-persist the wiped-out values.
+let _wipeTimer = null
+export function wipeContent() {
+  if (_wipeTimer) { clearTimeout(_wipeTimer); _wipeTimer = null }
+  flushAutosave()
+  workspace.uploadMeta = null
+  workspace.content = ''
+  workspace.planItems = []
+  workspace.procurementItems = []
+  workspace.aiTexts = { week_compare: '', daily_summary: '' }
+  workspace.narrativeOverrides = {}
+  persist()
+}
+
+// ---- shared autosave debouncer ----
+// Components call scheduleAutosave(saveFn); store coalesces concurrent calls so the
+// backend isn't re-hit on every keystroke. callFlushAutosave() forces the pending save
+// to run immediately and clears the timer — used after wipeContent.
+const _autosaveQueue = []
+let _autosaveTimer = null
+export function scheduleAutosave(saveFn, dbPathOrWeekId) {
+  _autosaveQueue.push({ saveFn, dbPathOrWeekId })
+  clearTimeout(_autosaveTimer)
+  _autosaveTimer = setTimeout(() => {
+    const pending = _autosaveQueue.splice(0)
+    _autosaveTimer = null
+    // run the latest entry (last write wins)
+    const last = pending[pending.length - 1]
+    if (last && last.saveFn) last.saveFn()
+  }, 800)
+}
+export function flushAutosave() {
+  if (_autosaveTimer) {
+    clearTimeout(_autosaveTimer)
+    _autosaveTimer = null
+    const pending = _autosaveQueue.splice(0)
+    const last = pending[pending.length - 1]
+    if (last && last.saveFn) last.saveFn()
+  }
+}
+
 export function gotoStep(step) {
   workspace.step = step
   persist()

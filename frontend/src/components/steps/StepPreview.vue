@@ -2,7 +2,7 @@
 import { ref, watch, onMounted, nextTick, inject } from 'vue'
 import Plotly from 'plotly.js-dist-min'
 import { getWorkspace, aiSection, putWorkspace } from '../../api'
-import { workspace, setAiTexts, setNarrativeOverride, gotoStep, markStepDone } from '../../store'
+import { workspace, setAiTexts, setNarrativeOverride, gotoStep, markStepDone, resetWorkspace } from '../../store'
 
 const showToast = inject('showToast')
 const props = defineProps({ weekId: String })
@@ -87,6 +87,13 @@ function fmtNum(n)   { return Number(n || 0).toLocaleString('zh-CN') }
 function fmtPct(n)   { return (Number(n || 0) * 100).toFixed(2) + '%' }
 
 function goForward() { markStepDone(3); gotoStep(4) }
+
+function restartFromScratch() {
+  if (!confirm('重新开始会清空整个工作流 (上传数据 + 工作内容 + 计划 + AI 文案) · 回到第 1 步上传。\n\n确定?')) return
+  resetWorkspace()
+  gotoStep(1)
+  showToast?.('已重新开始 · 回到第 1 步', 'info')
+}
 </script>
 
 <template>
@@ -266,6 +273,7 @@ function goForward() { markStepDone(3); gotoStep(4) }
 
   <div class="continue-bar">
     <div class="hint">预览就绪。下一步将渲染 Excel + PPT 并打包下载。</div>
+    <button class="btn btn-ghost" @click="restartFromScratch" title="清空整个工作流并回到第 1 步">↻ 重新开始</button>
     <button class="btn btn-secondary" @click="gotoStep(2)">返回 填写</button>
     <button class="btn btn-primary btn-lg" @click="goForward">
       下一步: 导出下载

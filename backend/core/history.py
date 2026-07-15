@@ -37,16 +37,15 @@ def init_db(db_path: str):
         conn.close()
 
 def save_week(week_id: str, df: pd.DataFrame, overview: dict, db_path: str):
+    """Re-upload of an existing week_id wipes its user workspace too. Re-uploads
+    are treated as 'different data' by default — preserving last week's plan /
+    procurement / AI narratives against new figures would be misleading. Callers
+    that want to preserve user input must skip this path (e.g. a future
+    `patch_workspace` endpoint)."""
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
-        # Preserve any user-entered workspace across re-uploads of the same week.
-        cur.execute("SELECT content, content_md, plan_items_json, procurement_items_json, narrative_overrides_json "
-                    "FROM weekly_workspace WHERE week_id=?", (week_id,))
-        ws_row = cur.fetchone()
-        # weekly_workspace has no FK to weekly_summary in our schema, so it must
-        # be deleted explicitly before the summary re-insert below or we'll hit
-        # a UNIQUE constraint failure on week_id.
+        # Delete leaf -> parent. workspace has no FK so explicit delete required.
         cur.execute("DELETE FROM weekly_workspace WHERE week_id=?", (week_id,))
         cur.execute("DELETE FROM weekly_orders WHERE week_id=?", (week_id,))
         cur.execute("DELETE FROM weekly_summary WHERE week_id=?", (week_id,))
@@ -61,14 +60,6 @@ def save_week(week_id: str, df: pd.DataFrame, overview: dict, db_path: str):
         for _, r in rows.iterrows():
             cur.execute("INSERT INTO weekly_orders(week_id," + ",".join(cols) + ") VALUES(?," + ",".join("?"*len(cols)) + ")",
                         (week_id, *r.tolist()))
-        # restore workspace if it existed before (preserve user content across re-upload)
-        if ws_row:
-            cur.execute("""INSERT INTO weekly_workspace
-               (week_id, content, content_md, plan_items_json, procurement_items_json,
-                narrative_overrides_json, updated_at)
-               VALUES(?,?,?,?,?,?,?)""",
-               (week_id, ws_row[0], ws_row[1], ws_row[2], ws_row[3], ws_row[4],
-                datetime.utcnow().isoformat()))
         conn.commit()
     finally:
         conn.close()

@@ -1,7 +1,7 @@
 <script setup>
 import { ref, computed, inject } from 'vue'
 import { upload } from '../../api'
-import { setWeek, markStepDone, gotoStep, STEP_META } from '../../store'
+import { setWeek, markStepDone, gotoStep, wipeContent, STEP_META, workspace } from '../../store'
 
 const emit = defineEmits(['forward'])
 const showToast = inject('showToast')
@@ -11,8 +11,20 @@ const dragging = ref(false)
 const busy = ref(false)
 const errorMsg = ref('')
 const uploadResult = ref(null)
+const confirmReupload = ref(false)   // show confirm modal mid-flow
 
 const next = computed(() => STEP_META[0])
+
+function hasUnsavedWork() {
+  if (!workspace.uploadMeta) return false
+  const c = (workspace.content || '').trim()
+  return c.length > 0
+        || workspace.planItems.length > 0
+        || workspace.procurementItems.length > 0
+        || !!workspace.aiTexts.week_compare
+        || !!workspace.aiTexts.daily_summary
+        || Object.keys(workspace.narrativeOverrides || {}).length > 0
+}
 
 async function pickFile(e) {
   const f = e.target.files?.[0]
@@ -33,20 +45,62 @@ function onDragOver(e) { e.preventDefault(); dragging.value = true }
 function onDragLeave()   { dragging.value = false }
 function clearFile()     { file.value = null; uploadResult.value = null; errorMsg.value = '' }
 
-async function submit() {
+// Decide whether to interrupt with a confirm before re-upload.
+function maybeConfirmAndUpload() {
+  if (hasUnsavedWork()) {
+    confirmReupload.value = true
+    return
+  }
+  doUpload()
+}
+
+async function confirmReuploadYes() {
+  confirmReupload.value = false
+  doUpload()
+}
+function confirmReuploadNo() {
+  confirmReupload.value = false
+  // user changed their mind — leave the selected file alone, just clear it
+  clearFile()
+}
+
+async function doUpload() {
   if (!file.value) { errorMsg.value = '请先选择文件'; return }
   busy.value = true; errorMsg.value = ''
   try {
     const r = await upload(file.value)
     uploadResult.value = r.data
+    // Wipe any locally-entered content (content, plans, AI text) so it
+    // doesn't accidentally apply to the freshly-parsed dataset.
+    wipeContent()
     setWeek(r.data.week_id, { rows: r.data.rows, 周起始日: r.data.周起始日, 周结束日: r.data.周结束日 })
-    showToast?.('已上传,正在准备下一步', 'success')
+    if (hasUnsavedWork()) {
+      // was a fresh upload → show success
+      showToast?.('已上传,可继续填写或直接进入下一步', 'success')
+    } else {
+      showToast?.('已重新上传 · 本周工作内容已全部清空 · 重新开始', 'success')
+    }
   } catch (err) {
     errorMsg.value = err?.response?.data?.detail || err.message || '上传失败'
   } finally { busy.value = false }
 }
 
+async function submit() {
+  if (!file.value) { errorMsg.value = '请先选择文件'; return }
+  // First-upload path (no prior data) uploads directly; subsequent uploads
+  // route through the confirm modal.
+  if (workspace.uploadMeta) {
+    maybeConfirmAndUpload()
+  } else {
+    doUpload()
+  }
+}
+
 async function useSample() {
+  if (workspace.uploadMeta) {
+    maybeConfirmAndUpload()
+    return
+  }
   busy.value = true; errorMsg.value = ''
   try {
     const blob = await (await fetch('/sample.xlsx')).blob()
@@ -54,6 +108,7 @@ async function useSample() {
     file.value = f
     const r = await upload(f)
     uploadResult.value = r.data
+    wipeContent()
     setWeek(r.data.week_id, { rows: r.data.rows, 周起始日: r.data.周起始日, 周结束日: r.data.周结束日 })
     showToast?.('示例已上传', 'success')
   } catch (err) {
@@ -61,7 +116,9 @@ async function useSample() {
   } finally { busy.value = false }
 }
 
-function goForward() { if (uploadResult.value) { markStepDone(1); gotoStep(2) } }
+function goForward() {
+  if (uploadResult.value) { markStepDone(1); gotoStep(2) }
+}
 
 function fmtBytes(n) {
   if (n < 1024) return n + ' B'
@@ -154,6 +211,36 @@ function fmtBytes(n) {
       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="margin-left:6px"><polyline points="9 18 15 12 9 6"/></svg>
     </button>
   </div>
+
+  <!-- Re-upload confirm modal -->
+  <Teleport to="body">
+    <div v-if="confirmReupload" class="onb-overlay" style="z-index:260" @click.self="confirmReuploadNo">
+      <div class="onb-shroud" style="background:rgba(15,23,42,0.5)"/>
+      <div class="onb-welcome" style="width:min(460px, calc(100vw - 32px))" @click.stop>
+        <div class="hero" style="background:linear-gradient(135deg,#f59e0b,#ef4444)">
+          <div class="hero-logo" style="font-size:26px">↺</div>
+          <h2 style="font-size:19px">重新上传将清空已填写内容</h2>
+          <p style="font-size:13px">检测到你已经上传过本周数据并填写了一些内容 · 继续会丢失这些内容</p>
+        </div>
+        <div class="body" style="padding:20px 28px 24px">
+          <ul style="margin:0 0 6px 18px;padding:0;color:var(--text-muted);font-size:12.5px;line-height:1.7">
+            <li v-if="workspace.content.trim().length">本周内容 <b>({{ workspace.content.trim().length }} 字)</b></li>
+            <li v-if="workspace.planItems.length">下周计划 ({{ workspace.planItems.length }} 条)</li>
+            <li v-if="workspace.procurementItems.length">采购要点 ({{ workspace.procurementItems.length }} 条)</li>
+            <li v-if="workspace.aiTexts.week_compare || workspace.aiTexts.daily_summary">AI 文案</li>
+          </ul>
+          <p class="muted" style="font-size:12px;margin:10px 0 18px">建议先复制再继续 · 或改用「保留内容」的方式单独调整数据。</p>
+          <div class="actions">
+            <button class="btn btn-secondary" @click="confirmReuploadNo">取消</button>
+            <button class="btn btn-primary" @click="confirmReuploadYes">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8"/><polyline points="3 3 3 8 8 8"/></svg>
+              确认重新上传
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>
 
 <style scoped>
