@@ -38,14 +38,25 @@ async function gen(kind) {
       ? { week_id: props.weekId }
       : { input: workspace.content })
     if (kind === 'wc' || kind === 'ds') {
-      workspace.aiTexts[kind === 'wc' ? 'week_compare' : 'daily_summary'] = r.data.text || ''
-      showToast?.(`${cfg.toast}已生成`, 'success')
+      const text = r.data.text || ''
+      workspace.aiTexts[kind === 'wc' ? 'week_compare' : 'daily_summary'] = text
+      showToast?.(text ? `${cfg.toast}已生成 · 共 ${text.length} 字` : `${cfg.toast}生成结果为空 · 请检查 AI 配置`, text ? 'success' : 'error')
     } else if (kind === 'proc') {
-      setProcurementItems(r.data.items || [])
-      showToast?.(`已结构化 ${workspace.procurementItems.length} 条采购`, 'success')
+      const items = r.data.items || []
+      setProcurementItems(items)
+      if (items.length === 0) {
+        showToast?.('采购要点未生成结果 · AI 不可用或内容过短 · 可手动添加行', 'error')
+      } else {
+        showToast?.(`已结构化 ${items.length} 条采购 · 可继续手动调整`, 'success')
+      }
     } else if (kind === 'plan') {
-      setPlanItems(r.data.items || [])
-      showToast?.(`已结构化 ${workspace.planItems.length} 条下周计划`, 'success')
+      const items = r.data.items || []
+      setPlanItems(items)
+      if (items.length === 0) {
+        showToast?.('下周计划未生成结果 · AI 不可用或内容过短 · 可手动添加行', 'error')
+      } else {
+        showToast?.(`已结构化 ${items.length} 条下周计划 · 可继续手动调整`, 'success')
+      }
     }
     save()
   } catch (err) {

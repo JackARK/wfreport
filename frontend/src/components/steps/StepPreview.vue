@@ -46,14 +46,29 @@ async function genAI(kind) {
   aiBusy.value[kind] = true
   try {
     const r = await aiSection(kind === 'wc' ? 'week_compare' : 'daily_summary', { week_id: props.weekId })
-    setAiTexts({ [kind === 'wc' ? 'week_compare' : 'daily_summary']: r.data.text || '' })
-    showToast?.(`${kind === 'wc' ? '上周对比' : '每日总结'} 文案已生成`, 'success')
+    const text = r.data.text || ''
+    setAiTexts({ [kind === 'wc' ? 'week_compare' : 'daily_summary']: text })
+    const label = kind === 'wc' ? '上周对比' : '每日总结'
+    if (text.length > 0) {
+      showToast?.(`${label}文案已生成 · 共 ${text.length} 字`, 'success')
+    } else {
+      showToast?.(`${label}生成结果为空 · 请检查 AI 配置或手动填写`, 'error')
+    }
     saveNarratives()
   } catch (e) {
-    showToast?.('AI 调用失败', 'error')
+    showToast?.('AI 调用失败: ' + (e?.response?.data?.detail || e.message || ''), 'error')
   } finally {
     aiBusy.value[kind] = false
   }
+}
+
+function onWcInput(e) {
+  setAiTexts({ week_compare: e.target.value })
+  saveNarratives()
+}
+function onDsInput(e) {
+  setAiTexts({ daily_summary: e.target.value })
+  saveNarratives()
 }
 
 let debounceSave = null
@@ -155,11 +170,13 @@ function goForward() { markStepDone(3); gotoStep(4) }
                 <textarea
                   class="textarea"
                   rows="6"
-                  :value="workspace.aiTexts.week_compare || data.figures ? '' : ''"
-                  @input="(e) => { setAiTexts({ week_compare: e.target.value }); saveNarratives() }"
+                  :value="workspace.aiTexts.week_compare"
+                  @input="onWcInput"
                   placeholder="点击「重新生成 · 上周对比」生成文案,或直接键入..."
                 />
-                <span class="muted" style="font-size:11.5px" v-if="workspace.aiTexts.week_compare">预览: {{ (workspace.aiTexts.week_compare || '').slice(0, 80) }}{{ (workspace.aiTexts.week_compare||'').length > 80 ? '...' : '' }}</span>
+                <span v-if="workspace.aiTexts.week_compare" class="muted" style="font-size:11.5px">
+                  共 <b>{{ workspace.aiTexts.week_compare.length }}</b> 字 · 已自动保存
+                </span>
               </label>
             </div>
             <div>
@@ -169,9 +186,12 @@ function goForward() { markStepDone(3); gotoStep(4) }
                   class="textarea"
                   rows="6"
                   :value="workspace.aiTexts.daily_summary"
-                  @input="(e) => { setAiTexts({ daily_summary: e.target.value }); saveNarratives() }"
+                  @input="onDsInput"
                   placeholder="点击「重新生成 · 每日总结」生成文案,或直接键入..."
                 />
+                <span v-if="workspace.aiTexts.daily_summary" class="muted" style="font-size:11.5px">
+                  共 <b>{{ workspace.aiTexts.daily_summary.length }}</b> 字 · 已自动保存
+                </span>
               </label>
             </div>
           </div>
