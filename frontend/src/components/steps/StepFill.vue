@@ -263,8 +263,11 @@ const parsedAgo = computed(() => fmtAgo(lastParsedAt.value))
             <span v-if="aiBusy">解析中 ...</span>
             <span v-else>📝→📊 AI 解析并保存</span>
           </button>
-          <span class="muted" style="font-size:12px">
+          <span class="muted" style="font-size:12px" v-if="!aiBusy">
             {{ workspace.planItems.length + workspace.procurementItems.length }} 条已结构化
+          </span>
+          <span class="muted" style="font-size:12px" v-else>
+            AI 解析中 · 解析中可能需要 10-20 秒 ...
           </span>
           <button v-if="hasParsedItems" class="btn btn-ghost btn-sm" @click="showStructured = !showStructured">
             {{ showStructured ? '收起' : '查看' }} AI 抽出的条目

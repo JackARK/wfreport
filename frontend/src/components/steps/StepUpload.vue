@@ -74,6 +74,11 @@ async function doUpload() {
     // doesn't accidentally apply to the freshly-parsed dataset.
     wipeContent()
     setWeek(r.data.week_id, { rows: r.data.rows, 周起始日: r.data.周起始日, 周结束日: r.data.周结束日 })
+    // P1-#6: mark step 1 done so the sidebar's step 2 becomes clickable
+    // immediately. Without this the user has to first click the bottom
+    // "下一步: 填写工作内容" button — the stepper stays on "上传" and
+    // feels like a hang.
+    markStepDone(1)
     if (hasUnsavedWork()) {
       // was a fresh upload → show success
       showToast?.('已上传,可继续填写或直接进入下一步', 'success')

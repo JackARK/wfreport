@@ -28,12 +28,17 @@ def fig_overview(b) -> go.Figure:
 def fig_daily(b) -> go.Figure:
     d = b.daily
     xs = d["订单日期"].dt.strftime("%m-%d").tolist()
+    # P1-#9: alternate line label positions so adjacent days whose 毛利率
+    # is within 1-2pp don't pile their text on top of each other.
+    n = len(xs)
+    line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(n)]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=xs, y=d["销售金额"], name="销售额",
                          text=[_wan(v) for v in d["销售金额"]], textposition="outside",
                          marker_color=_PALETTE["blue"]), secondary_y=False)
     fig.add_trace(go.Scatter(x=xs, y=d["销售毛利率"], name="毛利率",
-                             text=[_pct(v) for v in d["销售毛利率"]], textposition="top center",
+                             text=[_pct(v) for v in d["销售毛利率"]],
+                             textposition=line_text_pos,
                              mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
                   secondary_y=True)
     fig.update_layout(title="每日销售趋势", yaxis=dict(title="销售额(元)"),
@@ -45,6 +50,7 @@ def fig_daily(b) -> go.Figure:
 
 def fig_brand_combo(b) -> go.Figure:
     d = b.brand
+    line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(len(d))]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=d["品牌"], y=d["销售金额"], name="销售额",
                          text=[_wan(v) for v in d["销售金额"]], textposition="outside",
@@ -53,31 +59,62 @@ def fig_brand_combo(b) -> go.Figure:
                          text=d["销售数量"].tolist(), textposition="outside",
                          marker_color=_PALETTE["green"]), secondary_y=False)
     fig.add_trace(go.Scatter(x=d["品牌"], y=d["销售毛利率"], name="毛利率",
-                             text=[_pct(v) for v in d["销售毛利率"]], textposition="top center",
+                             text=[_pct(v) for v in d["销售毛利率"]],
+                             textposition=line_text_pos,
                              mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
                   secondary_y=True)
     fig.update_layout(title="品牌分析", barmode="group",
                       yaxis=dict(title="数量"), yaxis2=dict(title="毛利率", tickformat=".1%"))
     return fig
 
+def _bucket_small_slices(labels, values, threshold=0.01):
+    """Collapse pie slices below `threshold` (default 1%) into a single
+    '其他' bucket. Tiny slices (<1%) render with cramped labels that
+    overlap the legend and look like '0.00527%' noise — collapsing
+    them makes the chart legible."""
+    total = sum(values)
+    if total <= 0 or len(labels) <= 3:
+        return list(labels), list(values)
+    keep_l, keep_v = [], []
+    other_v = 0.0
+    for lab, v in zip(labels, values):
+        if v / total >= threshold:
+            keep_l.append(lab); keep_v.append(v)
+        else:
+            other_v += v
+    if other_v > 0:
+        keep_l.append("其他"); keep_v.append(other_v)
+    return keep_l, keep_v
+
+
 def fig_brand_pie(b) -> go.Figure:
     d = b.brand
-    fig = go.Figure(go.Pie(labels=d["品牌"], values=d["销售数量"], textinfo="label+percent",
+    labels, values = _bucket_small_slices(list(d["品牌"]), list(d["销售数量"]))
+    fig = go.Figure(go.Pie(labels=labels, values=values, textinfo="label+percent",
                            hole=0.4, marker=dict(colors=[_PALETTE["blue"], _PALETTE["green"]])))
     fig.update_layout(title="品牌销售数量占比")
     return fig
 
 def fig_platform(b) -> go.Figure:
     d = b.platform.sort_values("销售数量", ascending=False)
+    pie_labels, pie_values = _bucket_small_slices(list(d["平台"]), list(d["销售数量"]))
     fig = make_subplots(rows=1, cols=2, specs=[[{"type":"domain"}, {"secondary_y": True}]],
                         subplot_titles=("平台数量占比", "数量与毛利率"))
-    fig.add_trace(go.Pie(labels=d["平台"], values=d["销售数量"], textinfo="label+percent"), row=1, col=1)
+    fig.add_trace(go.Pie(labels=pie_labels, values=pie_values, textinfo="label+percent"),
+                  row=1, col=1)
+    # P1-#9: alternate line label position so adjacent points don't pile
+    # the text on top of each other when 毛利率 values are within 1-2pp.
+    line_text_pos = []
+    for i in range(len(d)):
+        line_text_pos.append("top center" if i % 2 == 0 else "bottom center")
     fig.add_trace(go.Bar(x=d["平台"], y=d["销售数量"], name="数量",
                          text=d["销售数量"].tolist(), textposition="outside",
                          marker_color=_PALETTE["blue"]), row=1, col=2, secondary_y=False)
     fig.add_trace(go.Scatter(x=d["平台"], y=d["销售毛利率"], name="毛利率",
-                             text=[_pct(v) for v in d["销售毛利率"]], textposition="top center",
-                             mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
+                             text=[_pct(v) for v in d["销售毛利率"]],
+                             textposition=line_text_pos,
+                             mode="lines+markers+text",
+                             line=dict(color=_PALETTE["red"], width=3)),
                   row=1, col=2, secondary_y=True)
     fig.update_layout(title="平台分析")
     fig.update_yaxes(title_text="数量", row=1, col=2, secondary_y=False)
@@ -216,12 +253,14 @@ def fig_new_products(b) -> go.Figure:
     d = b.new_products
     if d.empty:
         return go.Figure().update_layout(title="无新品")
+    line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(len(d))]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=d["商品名称"], y=d["销售数量"], name="数量",
                          text=d["销售数量"].tolist(), textposition="outside",
                          marker_color=_PALETTE["purple"]), secondary_y=False)
     fig.add_trace(go.Scatter(x=d["商品名称"], y=d["销售毛利率"], name="毛利率",
-                             text=[_pct(v) for v in d["销售毛利率"]], textposition="top center",
+                             text=[_pct(v) for v in d["销售毛利率"]],
+                             textposition=line_text_pos,
                              mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
                   secondary_y=True)
     fig.update_layout(title="新品 销量与毛利率", yaxis=dict(title="数量"),

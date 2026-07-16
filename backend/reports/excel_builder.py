@@ -24,7 +24,8 @@ def _shop_pivot(bundle):
     return pivot.reset_index()
 
 
-def build_excel(bundle, recent_weeks, ai_texts: dict, out_path: str) -> str:
+def build_excel(bundle, recent_weeks, ai_texts: dict, procurement_items: list,
+                plan_items: list, out_path: str) -> str:
     wb = xlsxwriter.Workbook(out_path)
     f = _fmt(wb)
     money = wb.add_format({"num_format": f["money"]})
@@ -117,5 +118,47 @@ def build_excel(bundle, recent_weeks, ai_texts: dict, out_path: str) -> str:
     for i, (k, v) in enumerate(ai_texts.items()):
         wai.write(i, 0, k, f["header"])
         wai.write(i, 1, v)
+
+    # P1-#12: also persist the AI-parsed procurement + plan rows so the
+    # reader can audit what fed into the report. Each row gets its own
+    # sub-table starting after the AI text block.
+    def _ai_rows(items, cols):
+        out = []
+        for r in (items or []):
+            row = []
+            for c in cols:
+                v = r.get(c, "")
+                if isinstance(v, list):
+                    v = " / ".join(str(x) for x in v)
+                row.append(str(v) if v is not None else "")
+            out.append(row)
+        return out
+
+    def _write_subtable(start_row, title, cols, rows):
+        if not rows:
+            return start_row
+        wai.merge_range(start_row, 0, start_row, len(cols) - 1, title, f["header"])
+        start_row += 1
+        for c, col in enumerate(cols):
+            wai.write(start_row, c, col, f["header"])
+        start_row += 1
+        for r in rows:
+            for c, val in enumerate(r):
+                wai.write(start_row, c, val)
+            start_row += 1
+        return start_row + 1   # blank spacer row
+
+    cursor = len(ai_texts) + 2
+    cursor = _write_subtable(
+        cursor, "采购跟进 (AI 解析)",
+        ["事项内容", "进度及责任人", "状态", "完成时间"],
+        _ai_rows(procurement_items, ["事项内容", "进度及责任人", "状态", "完成时间"]),
+    )
+    cursor = _write_subtable(
+        cursor, "下周计划 (AI 解析)",
+        ["事项内容", "提出时间", "次周预计完成节点名称", "涉及部门"],
+        _ai_rows(plan_items, ["事项内容", "提出时间", "次周预计完成节点名称", "涉及部门"]),
+    )
+
     wb.close()
     return out_path

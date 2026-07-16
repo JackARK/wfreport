@@ -265,7 +265,7 @@ def generate(week_id: str, payload: dict):
     narratives = {k: (client_narratives.get(k) or built_narratives.get(k, ""))
                   for k in ("brand", "brand_share", "product", "new")}
     xlsx = os.path.join("output", week_id, f"{week_id}.xlsx")
-    build_excel(bundle, recent, ai_texts, xlsx)
+    build_excel(bundle, recent, ai_texts, procurement_items, plan_items, xlsx)
     pptx = os.path.join("output", week_id, f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
@@ -366,7 +366,7 @@ def build_full(week_id: str, payload: dict = Body(default={})):
 
     xlsx = str(week_dir / f"{week_id}.xlsx")
     pptx = str(week_dir / f"{week_id}.pptx")
-    build_excel(bundle, recent, ai_texts, xlsx)
+    build_excel(bundle, recent, ai_texts, proc_items, plan_items, xlsx)
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
               pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
