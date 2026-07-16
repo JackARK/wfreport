@@ -200,30 +200,70 @@ def _empty_workspace(week_id: str) -> dict:
             "narrative_overrides": {}, "updated_at": None}
 
 def load_workspace(week_id: str, db_path: str) -> dict:
+    """Read the workspace by column name. We don't rely on positional SELECT *
+    because the column order has shifted over time (plan_text was added via
+    ALTER TABLE in older DBs but appears mid-CREATE in new ones) — that
+    mismatch silently swapped plan_items_json and plan_text in tests."""
     conn = _connect(db_path)
     try:
-        row = conn.execute("SELECT * FROM weekly_workspace WHERE week_id=?", (week_id,)).fetchone()
-        if not row:
+        # Query each column individually so the index in the result row
+        # matches the constant below regardless of the underlying schema.
+        cols = ("content", "content_md", "plan_text",
+                "plan_items_json", "procurement_items_json",
+                "narrative_overrides_json", "updated_at")
+        placeholders = ",".join(f"IFNULL((SELECT {c} FROM weekly_workspace WHERE week_id=?), '')"
+                                for c in cols)
+        params = [week_id] * len(cols)
+        row = conn.execute(f"SELECT {placeholders}", params).fetchone()
+        if not row or all(v == "" for v in row):
             return _empty_workspace(week_id)
-        # Old DBs may not have plan_text column -> default to ''
-        try:
-            plan_text = row[7] if len(row) > 7 else ""
-        except Exception:
-            plan_text = ""
+        # Sub-selects may return NULL when column doesn't exist in older DBs;
+        # the IFNULL above gives '' for plan_text and '[]'/'{}' for the JSON
+        # columns below when stored value is null. Guard each JSON parse.
+        def _j(d, fb):
+            try:
+                v = json.loads(d)
+                return v if v is not None else fb
+            except Exception:
+                return fb
         return {
-            "week_id": row[0],
-            "content": row[1] or "",
-            "content_md": row[2] or "",
-            "plan_text": plan_text or "",
-            "plan_items": json.loads(row[3] or "[]"),
-            "procurement_items": json.loads(row[4] or "[]"),
-            "narrative_overrides": json.loads(row[5] or "{}"),
-            "updated_at": row[6],
+            "week_id": week_id,
+            "content":       row[0] or "",
+            "content_md":    row[1] or "",
+            "plan_text":     row[2] or "",
+            "plan_items":    _j(row[3], []),
+            "procurement_items": _j(row[4], []),
+            "narrative_overrides": _j(row[5], {}),
+            "updated_at":    row[6],
         }
     finally:
         conn.close()
 
 def save_workspace(week_id: str, ws: dict, db_path: str) -> dict:
+    """Persist the workspace. Merge semantics: fields absent from `ws` keep
+    their existing stored value (so a partial update — e.g. only
+    narrative_overrides — does NOT wipe content / plan_items / etc.).
+
+    Send {"content": "", ...} explicitly to clear a field. This matches
+    the principle of least surprise: callers can update a single field
+    without first having to read back the whole workspace.
+    """
+    existing = load_workspace(week_id, db_path) if _row_exists(week_id, db_path) else {}
+
+    def _pick(key, default):
+        # key present in incoming ws (even as None) means caller wants to set it.
+        # key absent means keep the existing value.
+        if key in ws:
+            return ws[key] if ws[key] is not None else default
+        return existing.get(key, default)
+
+    content       = _pick("content", "")
+    content_md    = _pick("content_md", "")
+    plan_text     = _pick("plan_text", "")
+    plan_items    = _pick("plan_items", [])
+    proc_items    = _pick("procurement_items", [])
+    narr_over     = _pick("narrative_overrides", {})
+
     conn = _connect(db_path)
     try:
         cur = conn.cursor()
@@ -240,14 +280,24 @@ def save_workspace(week_id: str, ws: dict, db_path: str) -> dict:
                  narrative_overrides_json=excluded.narrative_overrides_json,
                  updated_at=excluded.updated_at""",
             (week_id,
-             ws.get("content", ""),
-             ws.get("content_md", ""),
-             ws.get("plan_text", ""),
-             json.dumps(ws.get("plan_items", []), ensure_ascii=False),
-             json.dumps(ws.get("procurement_items", []), ensure_ascii=False),
-             json.dumps(ws.get("narrative_overrides", {}), ensure_ascii=False),
+             content,
+             content_md,
+             plan_text,
+             json.dumps(plan_items, ensure_ascii=False),
+             json.dumps(proc_items, ensure_ascii=False),
+             json.dumps(narr_over, ensure_ascii=False),
              datetime.utcnow().isoformat()))
         conn.commit()
         return load_workspace(week_id, db_path)
+    finally:
+        conn.close()
+
+
+def _row_exists(week_id: str, db_path: str) -> bool:
+    conn = _connect(db_path)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT 1 FROM weekly_workspace WHERE week_id=?", (week_id,))
+        return cur.fetchone() is not None
     finally:
         conn.close()

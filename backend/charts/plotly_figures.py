@@ -27,7 +27,7 @@ def fig_overview(b) -> go.Figure:
 
 def fig_daily(b) -> go.Figure:
     d = b.daily
-    xs = d["订单日期"].dt.strftime("%m-%d")
+    xs = d["订单日期"].dt.strftime("%m-%d").tolist()
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=xs, y=d["销售金额"], name="销售额",
                          text=[_wan(v) for v in d["销售金额"]], textposition="outside",
@@ -38,6 +38,9 @@ def fig_daily(b) -> go.Figure:
                   secondary_y=True)
     fig.update_layout(title="每日销售趋势", yaxis=dict(title="销售额(元)"),
                       yaxis2=dict(title="毛利率", tickformat=".1%"))
+    # P0-#2: force categorical so plotly doesn't parse "07-03" as a date
+    # and stretch the axis into Mar/Apr/.../Sep of some default year.
+    fig.update_xaxes(type="category")
     return fig
 
 def fig_brand_combo(b) -> go.Figure:
@@ -90,6 +93,8 @@ def _heatmap(long_df, title, entity_col):
                                texttemplate="%{text}", colorscale="Blues", colorbar=dict(title="数量")))
     fig.update_layout(title=title, xaxis_title="日期", yaxis_title="")
     fig.update_yaxes(autorange="reversed")
+    # P0-#2: see fig_daily — same category fix for heatmap x-axis.
+    fig.update_xaxes(type="category")
     return fig
 
 def fig_shop_heatmap(b) -> go.Figure:

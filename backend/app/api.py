@@ -374,47 +374,6 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     return {"ok": True,
             "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
             "ppt_url": f"/api/download/{week_id}/{week_id}.pptx"}
-    df, bundle = _state[week_id]
-    ws = history.load_workspace(week_id, _db())
-
-    recent = history.get_recent_weeks(3, _db())
-    os.makedirs("output", exist_ok=True)
-    week_dir = OUT_ROOT / week_id
-    week_dir.mkdir(parents=True, exist_ok=True)
-    png_dir = week_dir / "png"
-    pngs = render_all_pngs(bundle, recent, str(png_dir))
-
-    week_meta = {"week_id": week_id,
-                 "周起始日": str(df["订单日期"].min().date()),
-                 "周结束日": str(df["订单日期"].max().date())}
-    built_narratives = narratives_mod.build_narratives(bundle, week_meta)
-    overrides = ws.get("narrative_overrides") or {}
-    narratives = {k: (overrides.get(k) or built_narratives.get(k, ""))
-                  for k in ("brand", "brand_share", "product", "new")}
-
-    # ai_texts come from payload (caller asks AI live from step 3) but fall back to persisted content
-    ai_texts_in = payload.get("ai_texts", {}) or {}
-    ai_texts = {
-        "week_compare": ai_texts_in.get("week_compare") or ws.get("content_md", ""),
-        "daily_summary": ai_texts_in.get("daily_summary") or "",
-        "procurement": "",
-        "next_plan": "",
-    }
-
-    # plans come from persisted workspace
-    proc_items = payload.get("procurement_items") or ws.get("procurement_items") or []
-    plan_items = payload.get("plan_items") or ws.get("plan_items") or []
-
-    xlsx = str(week_dir / f"{week_id}.xlsx")
-    pptx = str(week_dir / f"{week_id}.pptx")
-    build_excel(bundle, recent, ai_texts, xlsx)
-    pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
-    build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
-              pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
-
-    return {"ok": True,
-            "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
-            "ppt_url": f"/api/download/{week_id}/{week_id}.pptx"}
 
 
 @router.get("/api/bundle/{week_id}.zip")

@@ -77,7 +77,26 @@ function saveNarratives() {
   debounceSave = setTimeout(async () => {
     if (!props.weekId) return
     try {
-      await putWorkspace(props.weekId, { narrative_overrides: workspace.narrativeOverrides })
+      // Send the FULL workspace, not just narrative_overrides — backend merge
+      // now tolerates partial bodies, but writing the whole state keeps the
+      // round-trip self-describing and avoids surprising out-of-sync fields.
+      //
+      // Note: aiTexts (week_compare / daily_summary) and narrativeOverrides
+      // are two separate store fields. The server stores AI text under
+      // narrative_overrides (so load_workspace round-trips it back), so we
+      // merge both sources into one map here.
+      const mergedOverrides = {
+        ...workspace.narrativeOverrides,
+        week_compare:   workspace.aiTexts.week_compare   || '',
+        daily_summary:  workspace.aiTexts.daily_summary  || '',
+      }
+      await putWorkspace(props.weekId, {
+        content: workspace.content,
+        plan_text: workspace.planText,
+        plan_items: workspace.planItems,
+        procurement_items: workspace.procurementItems,
+        narrative_overrides: mergedOverrides,
+      })
     } catch {}
   }, 600)
 }

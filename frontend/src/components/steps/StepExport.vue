@@ -25,7 +25,17 @@ async function buildAll() {
   if (!props.weekId) { showToast?.('请先上传数据', 'error'); return }
   building.value = true; errMsg.value = ''
   try {
-    const r = await buildFull(props.weekId, { ai_texts: workspace.aiTexts })
+    // Send full workspace + AI texts so the build is self-contained —
+    // even if a prior autosave never made it to the DB, the live store
+    // values still drive the PPT/Excel.
+    const r = await buildFull(props.weekId, {
+      ai_texts: workspace.aiTexts,
+      content: workspace.content,
+      plan_text: workspace.planText,
+      plan_items: workspace.planItems,
+      procurement_items: workspace.procurementItems,
+      narrative_overrides: workspace.narrativeOverrides,
+    })
     built.value = { xlsx: !!r.xlsx_url, ppt: !!r.ppt_url }
     showToast?.('Excel + PPT 已生成', 'success')
     await refresh()
