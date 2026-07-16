@@ -49,22 +49,45 @@ def fig_daily(b) -> go.Figure:
     return fig
 
 def fig_brand_combo(b) -> go.Figure:
+    """Per-brand 销售额 (bars) + 毛利率 (line).
+
+    Earlier this chart also plotted 销售数量 as a green bar on the same
+    y-axis as 销售额 — that crushed the 销售数量 bars into invisible
+    sticks at the bottom (units differ by ~100x: ~960K yuan vs ~10K
+    pieces). Drop the redundant bar; print 销售数量 as an annotation
+    INSIDE each 销售额 bar so the value still ships to the reader.
+    """
     d = b.brand
     line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(len(d))]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=d["品牌"], y=d["销售金额"], name="销售额",
                          text=[_wan(v) for v in d["销售金额"]], textposition="outside",
                          marker_color=_PALETTE["blue"]), secondary_y=False)
-    fig.add_trace(go.Bar(x=d["品牌"], y=d["销售数量"], name="销售数量",
-                         text=d["销售数量"].tolist(), textposition="outside",
-                         marker_color=_PALETTE["green"]), secondary_y=False)
+    # 销售数量 drawn as plain text under each brand name — readable in
+    # the PPT slot without competing for y-axis real estate.
+    for i, (brand, qty) in enumerate(zip(d["品牌"], d["销售数量"])):
+        fig.add_annotation(
+            x=brand, y=0, yshift=-30,
+            text=f"销售数量 {int(qty):,} 件",
+            showarrow=False, font=dict(size=10, color="#475569"),
+            xanchor="center", yanchor="top",
+        )
     fig.add_trace(go.Scatter(x=d["品牌"], y=d["销售毛利率"], name="毛利率",
                              text=[_pct(v) for v in d["销售毛利率"]],
                              textposition=line_text_pos,
                              mode="lines+markers+text", line=dict(color=_PALETTE["red"], width=3)),
                   secondary_y=True)
-    fig.update_layout(title="品牌分析", barmode="group",
-                      yaxis=dict(title="数量"), yaxis2=dict(title="毛利率", tickformat=".1%"))
+    # Reserve room at the bottom for the 销售数量 annotation + extend the
+    # Y axis a bit so the annotation doesn't get clipped by the axis spine.
+    max_amount = float(d["销售金额"].max())
+    fig.update_layout(
+        title="品牌分析",
+        barmode="group",
+        margin=dict(t=70, b=70, l=70, r=70),
+        yaxis=dict(title="销售额 (元)", rangemode="tozero",
+                   range=[0, max_amount * 1.20]),
+        yaxis2=dict(title="毛利率", tickformat=".1%"),
+    )
     return fig
 
 def _bucket_small_slices(labels, values, threshold=0.01):
@@ -90,9 +113,20 @@ def _bucket_small_slices(labels, values, threshold=0.01):
 def fig_brand_pie(b) -> go.Figure:
     d = b.brand
     labels, values = _bucket_small_slices(list(d["品牌"]), list(d["销售数量"]))
+    # titleposition + tight margins so the chart fills its (typically
+    # square) PPT slot without leaving a huge empty band on the right.
     fig = go.Figure(go.Pie(labels=labels, values=values, textinfo="label+percent",
-                           hole=0.4, marker=dict(colors=[_PALETTE["blue"], _PALETTE["green"]])))
-    fig.update_layout(title="品牌销售数量占比")
+                           textposition="inside", insidetextorientation="horizontal",
+                           hole=0.45,
+                           marker=dict(colors=[_PALETTE["blue"], _PALETTE["green"]])))
+    fig.update_layout(
+        title=dict(text="品牌销售数量占比", x=0.02, xanchor="left",
+                   font=dict(size=14)),
+        showlegend=True,
+        legend=dict(orientation="v", x=1.02, y=0.5, yanchor="middle",
+                    font=dict(size=11)),
+        margin=dict(t=40, b=20, l=20, r=20),
+    )
     return fig
 
 def fig_platform(b) -> go.Figure:

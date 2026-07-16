@@ -20,6 +20,11 @@ router = APIRouter()
 _state = {}  # week_id -> (df, bundle)
 _CFG = Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
 OUT_ROOT = Path("output").resolve()
+DEFAULT_TEMPLATE = "resource/2026年第二十七周周报-王凡.pptx"
+
+
+def _tpath(payload) -> str:
+    return payload.get("template_path") or DEFAULT_TEMPLATE
 
 
 def _db():
@@ -252,7 +257,8 @@ def generate(week_id: str, payload: dict):
     df, bundle = _state[week_id]
     recent = history.get_recent_weeks(3, _db())
     os.makedirs("output", exist_ok=True)
-    pngs = render_all_pngs(bundle, recent, os.path.join("output", week_id, "png"))
+    pngs = render_all_pngs(bundle, recent, os.path.join("output", week_id, "png"),
+                            template_path=_tpath(payload))
     ai_texts = payload.get("ai_texts", {})
     procurement_items = payload.get("procurement_items", [])
     plan_items = payload.get("plan_items", [])
@@ -268,7 +274,7 @@ def generate(week_id: str, payload: dict):
     build_excel(bundle, recent, ai_texts, procurement_items, plan_items, xlsx)
     pptx = os.path.join("output", week_id, f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
-    build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
+    build_ppt(_tpath(payload),
               pngs, ai_texts, narratives, procurement_items, plan_items, week_meta, pptx)
     return {"excel": f"/api/download/{week_id}/{week_id}.xlsx",
             "ppt": f"/api/download/{week_id}/{week_id}.pptx"}
@@ -341,7 +347,8 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     week_dir = OUT_ROOT / week_id
     week_dir.mkdir(parents=True, exist_ok=True)
     png_dir = week_dir / "png"
-    pngs = render_all_pngs(bundle, recent, str(png_dir))
+    pngs = render_all_pngs(bundle, recent, str(png_dir),
+                        template_path=_tpath(payload))
 
     week_meta = {"week_id": week_id,
                  "周起始日": str(df["订单日期"].min().date()),
@@ -368,7 +375,7 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     pptx = str(week_dir / f"{week_id}.pptx")
     build_excel(bundle, recent, ai_texts, proc_items, plan_items, xlsx)
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
-    build_ppt(payload.get("template_path", "resource/2026年第二十七周周报-王凡.pptx"),
+    build_ppt(_tpath(payload),
               pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
 
     return {"ok": True,
