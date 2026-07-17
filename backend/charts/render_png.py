@@ -1,14 +1,17 @@
 """Render plotly figures to PNGs sized to match the PPT picture slots.
 
-Each chart ends up in a specific slot on a specific slide; that slot has
-its own W×H (in EMU / inches). If we always render at 1200×700 the
-PPT stretches the resulting image to fill the slot, distorting the
-chart. The cure is to read each slot's geometry from the template and
-render each PNG at the same aspect ratio — width is fixed by a target
-DPI, height is auto-computed.
+Each chart's input data is logged in full (small enough — these are
+summary frames, ≤ 15 rows each) so an operator reading logs can
+re-derive every figure without re-running the pipeline.
 """
+import os
 from pathlib import Path
+import time
+import pandas as pd
 from backend.charts import plotly_figures as pf
+from backend.core.logging_conf import get_logger
+
+logger = get_logger("render")
 
 # Render resolution knobs. Width in pixels; height is computed from
 # the slot's aspect ratio so the image never gets stretched.
@@ -22,10 +25,6 @@ def _emu_to_in(emu):
 
 
 def _first_picture(slide):
-    """Return (w_in, h_in) of the FIRST picture shape on the slide, or
-    None if there isn't one. Pictures sit at arbitrary positions in
-    slide.shapes (after auto-shapes + text boxes), so we filter by
-    shape_type instead of indexing."""
     for sh in slide.shapes:
         if sh.shape_type == 13:  # PICTURE
             w = _emu_to_in(sh.width)
@@ -36,10 +35,6 @@ def _first_picture(slide):
 
 
 def _slot_geometry(template_path: str):
-    """Read each chart's target slot dimensions (in inches) from the
-    template. Returns a dict keyed by the chart name used in build_ppt's
-    png_paths mapping. Charts not present in the template fall back to
-    the default aspect ratio."""
     from pptx import Presentation
 
     if not template_path:
@@ -49,16 +44,6 @@ def _slot_geometry(template_path: str):
     S = prs.slides
     geom = {}
 
-    # Slot layout — must mirror build_ppt() in ppt_builder.py:
-    #   slide 4  (idx 3)  overview, three_weeks (2 pictures)
-    #   slide 5  (idx 4)  daily
-    #   slide 6  (idx 5)  brand_combo
-    #   slide 7  (idx 6)  brand_pie
-    #   slide 8  (idx 7)  shop_heatmap
-    #   slide 9  (idx 8)  platform
-    #   slide 10 (idx 9)  product_horizontal
-    #   slide 11 (idx 10) factory
-    #   new_products goes in the duplicate of slide 9 (same slot dims)
     def _pick(slide_idx, key):
         if len(S) <= slide_idx:
             return
@@ -84,18 +69,43 @@ def _slot_geometry(template_path: str):
     return geom
 
 
+def _df_summary(name: str, df: pd.DataFrame | None) -> str:
+    """Compact multi-line dump of a dataframe for logs. Caps rows so we
+    don't blow up the log file with a 15K-row frame."""
+    if df is None or len(df) == 0:
+        return f"{name}=<empty>"
+    cols = ", ".join(df.columns.tolist())
+    head = df.head(5).to_string(index=False, max_cols=8)
+    tail = f"...(+{len(df)-5} more)" if len(df) > 5 else ""
+    return f"{name} rows={len(df)} cols=[{cols}]\n{head}\n{tail}"
+
+
+def _scalar_summary(name: str, value) -> str:
+    if isinstance(value, dict):
+        items = ", ".join(f"{k}={v}" for k, v in value.items())
+        return f"{name}={{{items}}}"
+    if isinstance(value, list):
+        return f"{name}=list[{len(value)}]"
+    return f"{name}={value}"
+
+
+def _log_chart_inputs(name: str, args: dict) -> None:
+    """Log the data each chart consumes (bundle.daily, bundle.brand, …)
+    so an operator can verify outputs without re-running."""
+    parts = [f"chart={name}"]
+    for k, v in args.items():
+        if isinstance(v, pd.DataFrame):
+            parts.append(_df_summary(k, v))
+        elif isinstance(v, (dict, list)):
+            parts.append(_scalar_summary(k, v))
+        else:
+            parts.append(f"{k}={v}")
+    logger.info("chart inputs\n  %s", "\n  ".join(parts))
+
+
 def _render_with_aspect(fig, out_path: str, slot_inches=None):
-    """Render fig sized to slot_inches = (w_in, h_in). Width is fixed at
-    _WIDTH_PX; height is derived so the PNG's aspect ratio matches the
-    slot exactly — replace_picture() will then insert it at the slot's
-    EMU dimensions and the chart won't be stretched/squished."""
     if slot_inches:
         w_in, h_in = slot_inches
-        # The 200px floor only kicks in for absurdly thin strips
-        # (aspect > 7:1) where kaleido refuses to render. For all
-        # realistic slots the height comes straight from the slot's
-        # aspect ratio, so width/height of the PNG matches the slot's
-        # inch aspect within rounding.
         h_px = max(int(round(_WIDTH_PX * (h_in / w_in))), 200)
     else:
         h_px = int(_WIDTH_PX * (_DEFAULT_H_IN / _DEFAULT_W_IN))
@@ -103,37 +113,84 @@ def _render_with_aspect(fig, out_path: str, slot_inches=None):
 
 
 def fig_to_png(fig, out_path: str, width: int = 1200, height: int = 700):
-    """Legacy entry point kept for callers that don't care about slot
-    sizing. New code should use render_all_pngs(template_path=...)."""
     fig.write_image(out_path, width=width, height=height, scale=1)
+
+
+def _build_chart_args(name: str, bundle, recent_weeks: list) -> dict:
+    """Pull the inputs each chart factory will use, by name. Keeps the
+    per-chart logging in one place."""
+    if name == "overview":
+        return {"bundle.overview": bundle.overview}
+    if name == "daily":
+        return {"bundle.daily": bundle.daily}
+    if name == "brand_combo":
+        return {"bundle.brand": bundle.brand}
+    if name == "brand_pie":
+        return {"bundle.brand": bundle.brand}
+    if name == "platform":
+        return {"bundle.platform": bundle.platform}
+    if name == "shop_heatmap":
+        return {"bundle.shop_top15_daily": bundle.shop_top15_daily}
+    if name == "product_horizontal":
+        return {"bundle.product_top15": bundle.product_top15}
+    if name == "product_table":
+        return {"bundle.product_top15": bundle.product_top15}
+    if name == "product_heatmap":
+        return {"bundle.product_top15_daily": bundle.product_top15_daily}
+    if name == "new_products":
+        return {"bundle.new_products": bundle.new_products}
+    if name == "three_weeks":
+        return {"recent_weeks": recent_weeks}
+    if name == "factory":
+        return {"bundle.factory_top5": bundle.factory_top5}
+    return {}
 
 
 def render_all_pngs(bundle, recent_weeks, out_dir: str,
                     template_path: str | None = None) -> dict:
     """Render every chart PNG to `out_dir`. When template_path is given,
-    each PNG is sized to match the slot it lands in on the PPT; the
-    fallback keeps the legacy 1200×700 dimensions for tests / CLI uses
-    that don't have a template at hand."""
+    each PNG is sized to match the slot it lands in on the PPT."""
     out = Path(out_dir)
     out.mkdir(parents=True, exist_ok=True)
     geom = _slot_geometry(template_path) if template_path else {}
-    mapping = {
-        "overview": pf.fig_overview(bundle),
-        "daily": pf.fig_daily(bundle),
-        "brand_combo": pf.fig_brand_combo(bundle),
-        "brand_pie": pf.fig_brand_pie(bundle),
-        "platform": pf.fig_platform(bundle),
-        "shop_heatmap": pf.fig_shop_heatmap(bundle),
-        "product_horizontal": pf.fig_product_horizontal(bundle),
-        "product_table": pf.fig_product_table(bundle),
-        "product_heatmap": pf.fig_product_heatmap(bundle),
-        "new_products": pf.fig_new_products(bundle),
-        "three_weeks": pf.fig_three_weeks_table(recent_weeks),
-        "factory": pf.fig_factory_table(bundle),
+    logger.info("render_all_pngs START out=%s template=%s slot_dims=%s",
+                out_dir, bool(template_path), {k: f"{v[0]:.2f}x{v[1]:.2f}in"
+                                                for k, v in geom.items()})
+
+    factories = {
+        "overview":           pf.fig_overview,
+        "daily":              pf.fig_daily,
+        "brand_combo":        pf.fig_brand_combo,
+        "brand_pie":          pf.fig_brand_pie,
+        "platform":           pf.fig_platform,
+        "shop_heatmap":       pf.fig_shop_heatmap,
+        "product_horizontal": pf.fig_product_horizontal,
+        "product_table":      pf.fig_product_table,
+        "product_heatmap":    pf.fig_product_heatmap,
+        "new_products":       pf.fig_new_products,
+        "three_weeks":        lambda b, r: pf.fig_three_weeks_table(r),
+        "factory":            pf.fig_factory_table,
     }
+
     paths = {}
-    for name, fig in mapping.items():
+    t0 = time.perf_counter()
+    for name, factory in factories.items():
+        chart_t0 = time.perf_counter()
+        args = _build_chart_args(name, bundle, recent_weeks)
+        _log_chart_inputs(name, args)
+        if name == "three_weeks":
+            fig = factory(bundle, recent_weeks)
+        else:
+            fig = factory(bundle)
         p = str(out / f"{name}.png")
         _render_with_aspect(fig, p, geom.get(name))
+        size_kb = os.path.getsize(p) / 1024
+        slot = geom.get(name)
+        slot_str = f"{slot[0]:.2f}x{slot[1]:.2f}in" if slot else "default"
+        logger.info("render %s → %s  size=%.0fKB slot=%s 耗时=%.2fs",
+                    name, p, size_kb, slot_str, time.perf_counter() - chart_t0)
         paths[name] = p
+
+    logger.info("render_all_pngs DONE charts=%d 总耗时=%.1fs",
+                len(paths), time.perf_counter() - t0)
     return paths

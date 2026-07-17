@@ -1,6 +1,7 @@
 import os
 import zipfile
 import io
+import time
 from pathlib import Path
 
 import yaml
@@ -10,11 +11,14 @@ from fastapi.responses import FileResponse
 from backend.ai import client as ai_client, prompts as ai_prompts
 from backend.charts.render_png import render_all_pngs
 from backend.core import parser, history, metrics
+from backend.core.logging_conf import get_logger
 from backend.core.week import week_range
 from backend.reports import web_report
 from backend.reports import narratives as narratives_mod
 from backend.reports.excel_builder import build_excel
 from backend.reports.ppt_builder import build_ppt
+
+logger = get_logger("api")
 
 router = APIRouter()
 _state = {}  # week_id -> (df, bundle)
@@ -35,6 +39,8 @@ def _db():
         return yaml.safe_load(f)["db_path"]
 
 
+# ===== Upload =====
+
 @router.post("/api/upload")
 async def upload(file: UploadFile = File(...)):
     safe_name = os.path.basename(file.filename or "").replace("..", "").strip()
@@ -44,16 +50,22 @@ async def upload(file: UploadFile = File(...)):
     os.makedirs("output", exist_ok=True)
     with open(tmp, "wb") as f:
         f.write(await file.read())
+    logger.info("上传文件 %s (%.1f KB)", safe_name, os.path.getsize(tmp) / 1024)
     df = parser.load_excel(tmp)
     wid = df["week_id"].iloc[0]
+    logger.info("解析完成 week_id=%s rows=%d cols=%d", wid, len(df), len(df.columns))
     bundle = metrics.compute_all(df)
     history.init_db(_db())
     history.save_week(wid, df, bundle.overview, _db())
+    logger.info("写入 SQLite week_id=%s overview=%s", wid,
+                {k: round(v, 2) if isinstance(v, float) else v for k, v in bundle.overview.items()})
     _state[wid] = (df, bundle)
     start, end = week_range(df)
     return {"week_id": wid, "rows": len(df),
             "周起始日": str(start.date()), "周结束日": str(end.date())}
 
+
+# ===== Preview =====
 
 @router.post("/api/preview/{week_id}")
 def preview(week_id: str):
@@ -61,8 +73,11 @@ def preview(week_id: str):
         raise HTTPException(404, "请先上传")
     _, bundle = _state[week_id]
     recent = history.get_recent_weeks(3, _db())
+    logger.info("预览构建 week_id=%s figures=%d", week_id, 12)
     return web_report.build_report_json(bundle, recent)
 
+
+# ===== History =====
 
 @router.get("/api/history")
 def history_api():
@@ -71,30 +86,29 @@ def history_api():
 
 @router.get("/api/history/all")
 def history_all():
-    """Every persisted week_id with its workspace summary and output file status.
-    Powers the frontend history page; lets the user re-open a previous week
-    without re-uploading anything."""
-    return {"weeks": history.list_weeks_with_files(_db(), OUT_ROOT)}
+    weeks = history.list_weeks_with_files(_db(), OUT_ROOT)
+    logger.info("历史列表 weeks=%d", len(weeks))
+    return {"weeks": weeks}
 
+
+# ===== Workspace =====
 
 def _ensure_state(week_id: str):
-    """Rebuild _state for week_id from SQLite if the in-memory copy was lost
-    (e.g. backend restarted). Returns True on success."""
     if week_id in _state:
         return True
+    logger.info("重建内存状态 week_id=%s (从 SQLite)", week_id)
     df = history.load_orders_as_df(week_id, _db())
     if df is None or len(df) == 0:
+        logger.warning("重建失败 week_id=%s — SQLite 无数据", week_id)
         return False
     bundle = metrics.compute_all(df)
     _state[week_id] = (df, bundle)
+    logger.info("重建成功 week_id=%s rows=%d", week_id, len(df))
     return True
 
 
 @router.post("/api/workspace/{week_id}/reload")
 def reload_state(week_id: str):
-    """Reconstruct in-memory state from SQLite weekly_orders. Used after a
-    backend restart (or when the user opens a historical week that hasn't
-    been loaded this session)."""
     if not history.week_exists(week_id, _db()):
         raise HTTPException(404, "该周数据未持久化到 SQLite")
     if not _ensure_state(week_id):
@@ -104,8 +118,6 @@ def reload_state(week_id: str):
 
 @router.get("/api/workspace/{week_id}/export.json")
 def export_workspace_json(week_id: str):
-    """Download the saved workspace (content + plans + AI overrides) for a
-    week so users can back up or share their notes outside the app."""
     ws = history.load_workspace(week_id, _db())
     from fastapi.responses import JSONResponse
     return JSONResponse(ws, headers={
@@ -115,14 +127,6 @@ def export_workspace_json(week_id: str):
 
 @router.post("/api/ai/parse_workspace/{week_id}")
 def parse_workspace(week_id: str, payload: dict = Body(default={})):
-    """Read this-week's freeform text + next-week's freeform plan,
-    call the AI twice (procurement parser + next_plan parser), persist the
-    structured rows + the raw text, and return the full workspace.
-
-    Step-2 just shows two textareas; users type whatever prose they want.
-    One click here does the heavy lifting - everything downstream (step 3
-    preview, step 4 build, the PPT/Excel) consumes the parsed rows.
-    """
     if week_id not in _state:
         if history.week_exists(week_id, _db()):
             _ensure_state(week_id)
@@ -134,7 +138,9 @@ def parse_workspace(week_id: str, payload: dict = Body(default={})):
     provider  = (payload.get("provider") or "").strip() or None
     thinking  = (payload.get("thinking") or "").strip() or None
 
-    # Call AI (with key-fallback to []/placeholder in client.generate_json).
+    logger.info("AI 解析 week_id=%s provider=%s thinking=%s 内容长度=%d 计划长度=%d",
+                week_id, provider, thinking, len(content), len(plan_text))
+
     proc_items = ai_client.generate_json(
         "procurement", {"user_input": content},
         provider=provider, thinking=thinking,
@@ -145,7 +151,9 @@ def parse_workspace(week_id: str, payload: dict = Body(default={})):
         provider=provider, thinking=thinking,
     ) if plan_text else []
 
-    # Persist the raw text + parsed rows in one shot.
+    logger.info("AI 解析完成 week_id=%s 采购=%d条 下周计划=%d条",
+                week_id, len(proc_items), len(plan_items))
+
     ws = history.load_workspace(week_id, _db())
     ws["content"]         = content
     ws["plan_text"]       = plan_text
@@ -169,7 +177,7 @@ def _week_compare_vars(payload: dict) -> dict:
     _, bundle = _state[week_id]
     cur_amt = float(bundle.overview["销售金额"])
     cur_prof = float(bundle.overview["销售毛利"])
-    cur_marg = float(bundle.overview["销售毛利率"]) * 100  # percent
+    cur_marg = float(bundle.overview["销售毛利率"]) * 100
     prev = history.get_previous_week(week_id, _db())
     if prev:
         prev_amt = float(prev["销售额"])
@@ -209,30 +217,34 @@ def _daily_summary_vars(payload: dict) -> dict:
     return {"daily_series": "\n".join(lines)}
 
 
+# ===== AI =====
+
 @router.post("/api/ai/{section}")
 def ai_section(section: str, payload: dict):
     provider = (payload.get("provider") or "").strip() or None
     thinking = (payload.get("thinking") or "").strip() or None
+    logger.info("AI section=%s provider=%s thinking=%s", section, provider, thinking)
     if section in ("procurement", "next_plan"):
         items = ai_client.generate_json(
             section, {"user_input": payload.get("input", "")},
             provider=provider, thinking=thinking,
         )
+        logger.info("AI section=%s 返回 items=%d", section, len(items))
         return {"items": items}
     if section == "week_compare":
-        return {"text": ai_client.generate_section("week_compare", _week_compare_vars(payload), provider=provider, thinking=thinking)}
+        text = ai_client.generate_section("week_compare", _week_compare_vars(payload), provider=provider, thinking=thinking)
+        logger.info("AI week_compare 返回 len=%d", len(text))
+        return {"text": text}
     if section == "daily_summary":
-        return {"text": ai_client.generate_section("daily_summary", _daily_summary_vars(payload), provider=provider, thinking=thinking)}
+        text = ai_client.generate_section("daily_summary", _daily_summary_vars(payload), provider=provider, thinking=thinking)
+        logger.info("AI daily_summary 返回 len=%d", len(text))
+        return {"text": text}
     text = ai_client.generate_section(section, payload.get("vars", {}), provider=provider, thinking=thinking)
     return {"text": text}
 
 
 @router.get("/api/ai/providers")
 def ai_providers():
-    """List configured AI providers for the UI dropdown.
-    Each entry exposes only safe metadata (no secrets); has_key tells the
-    UI whether to mark the provider as available / warn the user.
-    """
     return {"providers": ai_client.list_providers()}
 
 
@@ -247,8 +259,11 @@ def put_prompts(body: dict):
     with open(p, "w", encoding="utf-8") as f:
         yaml.safe_dump(body, f, allow_unicode=True)
     ai_prompts.reload()
+    logger.info("Prompts 已热加载")
     return ai_prompts.load()
 
+
+# ===== Generate (legacy endpoint) =====
 
 @router.post("/api/generate/{week_id}")
 def generate(week_id: str, payload: dict):
@@ -257,25 +272,30 @@ def generate(week_id: str, payload: dict):
     df, bundle = _state[week_id]
     recent = history.get_recent_weeks(3, _db())
     os.makedirs("output", exist_ok=True)
+    logger.info("Generate 开始 week_id=%s", week_id)
+    t0 = time.perf_counter()
     pngs = render_all_pngs(bundle, recent, os.path.join("output", week_id, "png"),
                             template_path=_tpath(payload))
+    logger.info("PNG 渲染完成 week_id=%s 耗时=%.1fs charts=%d",
+                week_id, time.perf_counter() - t0, len(pngs))
     ai_texts = payload.get("ai_texts", {})
     procurement_items = payload.get("procurement_items", [])
     plan_items = payload.get("plan_items", [])
     week_meta = {"week_id": week_id,
                  "周起始日": str(df["订单日期"].min().date()),
                  "周结束日": str(df["订单日期"].max().date())}
-    # Narratives: stitch server-side from the bundle; client values win only if non-empty.
     built_narratives = narratives_mod.build_narratives(bundle, week_meta)
     client_narratives = payload.get("narratives", {}) or {}
     narratives = {k: (client_narratives.get(k) or built_narratives.get(k, ""))
                   for k in ("brand", "brand_share", "product", "new")}
     xlsx = os.path.join("output", week_id, f"{week_id}.xlsx")
     build_excel(bundle, recent, ai_texts, procurement_items, plan_items, xlsx)
+    logger.info("Excel 生成完成 week_id=%s path=%s", week_id, xlsx)
     pptx = os.path.join("output", week_id, f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(_tpath(payload),
               pngs, ai_texts, narratives, procurement_items, plan_items, week_meta, pptx)
+    logger.info("PPT 生成完成 week_id=%s path=%s", week_id, pptx)
     return {"excel": f"/api/download/{week_id}/{week_id}.xlsx",
             "ppt": f"/api/download/{week_id}/{week_id}.pptx"}
 
@@ -299,7 +319,6 @@ def download(week_id: str, name: str):
 
 @router.get("/api/workspace/{week_id}")
 def get_workspace(week_id: str):
-    """Combined view for step 3 (preview): returns data + user-entered workspace."""
     if week_id not in _state:
         if not history.week_exists(week_id, _db()):
             raise HTTPException(404, "请先上传")
@@ -321,19 +340,17 @@ def get_workspace(week_id: str):
 
 @router.put("/api/workspace/{week_id}")
 def put_workspace(week_id: str, ws: dict = Body(...)):
-    """Save user-entered content + plan + AI narrative overrides."""
     if week_id not in _state and not history.week_exists(week_id, _db()):
         raise HTTPException(404, "请先上传")
     if not history.week_exists(week_id, _db()):
-        # touch summary row so FK succeeds if raw state lost
         history.save_week(week_id, _state[week_id][0], _state[week_id][1].overview, _db())
     saved = history.save_workspace(week_id, ws, _db())
+    logger.info("保存 workspace week_id=%s keys=%s", week_id, list(ws.keys()))
     return saved
 
 
 @router.post("/api/workspace/{week_id}/build")
 def build_full(week_id: str, payload: dict = Body(default={})):
-    """Step 4 trigger: render PNGs, build xlsx, build pptx using current workspace state."""
     if week_id not in _state:
         if history.week_exists(week_id, _db()):
             _ensure_state(week_id)
@@ -342,13 +359,22 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     df, bundle = _state[week_id]
     ws = history.load_workspace(week_id, _db())
 
+    logger.info("Build 开始 week_id=%s 采购=%d 计划=%d",
+                week_id,
+                len(payload.get("procurement_items") or ws.get("procurement_items") or []),
+                len(payload.get("plan_items") or ws.get("plan_items") or []))
+
     recent = history.get_recent_weeks(3, _db())
     os.makedirs("output", exist_ok=True)
     week_dir = OUT_ROOT / week_id
     week_dir.mkdir(parents=True, exist_ok=True)
     png_dir = week_dir / "png"
+
+    t0 = time.perf_counter()
     pngs = render_all_pngs(bundle, recent, str(png_dir),
                         template_path=_tpath(payload))
+    logger.info("PNG 渲染完成 week_id=%s 耗时=%.1fs charts=%d",
+                week_id, time.perf_counter() - t0, len(pngs))
 
     week_meta = {"week_id": week_id,
                  "周起始日": str(df["订单日期"].min().date()),
@@ -358,7 +384,6 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     narratives = {k: (overrides.get(k) or built_narratives.get(k, ""))
                   for k in ("brand", "brand_share", "product", "new")}
 
-    # ai_texts come from payload (caller asks AI live from step 3) but fall back to persisted content
     ai_texts_in = payload.get("ai_texts", {}) or {}
     ai_texts = {
         "week_compare": ai_texts_in.get("week_compare") or ws.get("content_md", ""),
@@ -367,16 +392,19 @@ def build_full(week_id: str, payload: dict = Body(default={})):
         "next_plan": "",
     }
 
-    # plans come from persisted workspace
     proc_items = payload.get("procurement_items") or ws.get("procurement_items") or []
     plan_items = payload.get("plan_items") or ws.get("plan_items") or []
 
     xlsx = str(week_dir / f"{week_id}.xlsx")
-    pptx = str(week_dir / f"{week_id}.pptx")
     build_excel(bundle, recent, ai_texts, proc_items, plan_items, xlsx)
+    logger.info("Excel 生成 week_id=%s size=%.0fKB", week_id, os.path.getsize(xlsx) / 1024)
+
+    pptx = str(week_dir / f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(_tpath(payload),
               pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
+    logger.info("PPT 生成 week_id=%s size=%.0fKB 总耗时=%.1fs",
+                week_id, os.path.getsize(pptx) / 1024, time.perf_counter() - t0)
 
     return {"ok": True,
             "xlsx_url": f"/api/download/{week_id}/{week_id}.xlsx",
@@ -385,7 +413,6 @@ def build_full(week_id: str, payload: dict = Body(default={})):
 
 @router.get("/api/bundle/{week_id}.zip")
 def download_bundle(week_id: str):
-    """Bundle all generated artifacts + raw xlsx copy into a single zip."""
     if (week_id in ("", ".", "..") or "/" in week_id or "\\" in week_id):
         raise HTTPException(404)
     week_dir = (OUT_ROOT / week_id).resolve()
@@ -402,12 +429,71 @@ def download_bundle(week_id: str):
             files.append(sub)
     if not files:
         raise HTTPException(404, "本周尚未生成任何产物")
+    logger.info("打包下载 week_id=%s files=%d", week_id, len(files))
+
+    # Snapshot current wfreport.log + rotated backups into
+    # logs/exports/YYYY_MM_DD_HH_MM_SS.log so the user gets a copy of
+    # the log alongside the bundle. Done before zip so any further log
+    # writes happen to the new rotated file.
+    from datetime import datetime
+    from backend.core.logging_conf import get_logger
+    export_logger = get_logger("api.export")
+    export_dir = Path("logs/exports")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    log_snapshot = export_dir / f"{ts}.log"
+    log_files = []
+    main_log = Path("logs/wfreport.log")
+    if main_log.exists():
+        log_files.append(main_log)
+    # Rotated backups: wfreport.log.1, wfreport.log.2, wfreport.log.3
+    for i in range(1, 4):
+        rotated = Path(f"logs/wfreport.log.{i}")
+        if rotated.exists():
+            log_files.append(rotated)
+    if log_files:
+        try:
+            with open(log_snapshot, "wb") as out:
+                for lf in sorted(log_files):
+                    out.write(b"\n===== " + str(lf).encode() + b" =====\n")
+                    out.write(lf.read_bytes())
+            logger.info("日志快照已导出 %s (%d 字节, %d 个源文件)",
+                        log_snapshot, log_snapshot.stat().st_size, len(log_files))
+            export_logger.info("log_export_ok path=%s bytes=%d sources=%d",
+                               str(log_snapshot), log_snapshot.stat().st_size, len(log_files))
+            files.append(log_snapshot)
+        except OSError as e:
+            logger.warning("日志快照导出失败 %s: %s", log_snapshot, e)
+
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
         for f in files:
-            arcname = f.name  # basename only (avoid zip-slip)
+            arcname = f.name
             zf.write(f, arcname)
     buf.seek(0)
     from fastapi.responses import StreamingResponse
+    logger.info("打包下载 DONE week_id=%s total_files=%d", week_id, len(files))
     return StreamingResponse(buf, media_type="application/zip",
                              headers={"Content-Disposition": f"attachment; filename={week_id}-bundle.zip"})
+
+
+# ===== Log export =====
+
+@router.get("/api/logs/export")
+def export_log_snapshot():
+    """Manual snapshot of the current log file (for ops debugging
+    without triggering a full build). File: logs/exports/<timestamp>.log"""
+    from datetime import datetime
+    export_dir = Path("logs/exports")
+    export_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.now().strftime("%Y_%m_%d_%H_%M_%S")
+    out = export_dir / f"{ts}.log"
+    main_log = Path("logs/wfreport.log")
+    if not main_log.exists():
+        raise HTTPException(404, "日志文件不存在")
+    out.write_bytes(b"===== " + str(main_log).encode() + b" =====\n"
+                     + main_log.read_bytes())
+    logger.info("手动日志快照已导出 %s (%d 字节)", out, out.stat().st_size)
+    from fastapi.responses import FileResponse
+    return FileResponse(str(out),
+                        headers={"Content-Disposition": f"attachment; filename={ts}.log"})

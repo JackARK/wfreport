@@ -1,0 +1,26 @@
+.venv/
+node_modules/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.gitignore
+output/
+data/
+logs/
+*.log
+session-*.md
+docs/
+tests/
+.venv.bak/
+.venv-*/
+
+# 含 API key 的本地文件,绝不能进镜像
+需求描述.md
+
+# IDE / 杂项
+.vscode/
+.idea/
+.DS_Store
+*.swp

@@ -1,5 +1,10 @@
 import copy
+import time
 from pptx import Presentation
+
+from backend.core.logging_conf import get_logger
+
+logger = get_logger("ppt")
 
 _A = "http://schemas.openxmlformats.org/drawingml/2006/main"
 _A_TR = f"{{{_A}}}tr"
@@ -155,8 +160,19 @@ def fill_table(table, items: list, col_keys: list, start_row: int = 1, start_no:
 
 def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
               plan_items, week_meta, out_path) -> str:
+    t0 = time.perf_counter()
+    logger.info("build_ppt START template=%s out=%s week=%s 采购=%d 计划=%d",
+                template_path, out_path, week_meta.get("week_id"),
+                len(procurement_items or []), len(plan_items or []))
+    logger.info("narratives keys=%s", list(narratives.keys()))
+    for k in ("week_compare", "daily_summary"):
+        v = ai_texts.get(k, "") or ""
+        logger.info("ai_texts.%s len=%d head=%.60s", k, len(v), v[:60].replace("\n", " "))
+
     prs = Presentation(template_path)
     S = prs.slides
+    logger.info("PPT 模板打开 slides=%d", len(prs.slides))
+
     # 页3 销售表现
     set_text(S[3], "文本框 5", ai_texts.get("week_compare", ""))
     replace_picture(S[3], 0, png_paths["overview"])
@@ -199,11 +215,14 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     while len(chunks) > len(proc_pages):
         dup = duplicate_slide(prs, proc_pages[-1])
         proc_pages.append(len(prs.slides) - 1)
+    logger.info("采购自动分页 chunks=%d proc_pages=%s", len(chunks), proc_pages)
     running_no = 1
     for pi, chunk in enumerate(chunks):
         slide = prs.slides[proc_pages[pi]]
         for sh in slide.shapes:
             if sh.has_table:
+                logger.info("填充采购表 slide=%d rows=%d start_no=%d",
+                            proc_pages[pi] + 1, len(chunk), running_no)
                 fill_table(sh.table, chunk, ["事项内容", "进度及责任人", "状态", "完成时间"], start_no=running_no)
         running_no += len(chunk)
     # P0-#3: drop unused procurement slides. We must do this AFTER the
@@ -213,27 +232,35 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     for unused_idx in sorted([proc_pages[i] for i in range(len(chunks), len(proc_pages))],
                              reverse=True):
         delete_slide(prs, unused_idx)
+        logger.info("删除多余采购 slide idx=%d", unused_idx)
 
     # 下周计划 — locate the slide by content rather than by index. The
     # procurement-slide deletion above shifts indexes by -1, which used
     # to silently land us on the "THANKS" / 感谢观看 page when only
     # 1-2 procurement pages were filled.
     plan_keys = ["事项内容", "提出时间", "次周预计完成节点名称", "涉及部门"]
+    plan_filled = False
     for slide in prs.slides:
         for sh in slide.shapes:
             if not sh.has_table:
                 continue
             t = sh.table
-            # plan template table: header row has at least 4 cells whose
-            # text matches the expected column labels
             if len(t.columns) < len(plan_keys):
                 continue
             header = [c.text_frame.text.strip() for c in t.rows[0].cells]
             if all(any(k in h for h in header) for k in plan_keys):
+                logger.info("填充下周计划表 rows=%d", len(plan_items or []))
                 fill_table(t, plan_items, plan_keys, start_no=1)
+                plan_filled = True
                 break
         else:
             continue
         break
+    if not plan_filled:
+        logger.warning("未找到下周计划表格 — 模板中可能缺少匹配表头")
+
     prs.save(out_path)
+    import os as _os
+    logger.info("build_ppt DONE → %s size=%.0fKB 总耗时=%.1fs",
+                out_path, _os.path.getsize(out_path) / 1024, time.perf_counter() - t0)
     return out_path

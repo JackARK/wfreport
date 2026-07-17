@@ -4,6 +4,10 @@ import pandas as pd
 from datetime import datetime
 from pathlib import Path
 
+from backend.core.logging_conf import get_logger
+
+logger = get_logger("history")
+
 def _connect(db_path: str):
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(db_path)
@@ -69,6 +73,7 @@ def save_week(week_id: str, df: pd.DataFrame, overview: dict, db_path: str):
             cur.execute("INSERT INTO weekly_orders(week_id," + ",".join(cols) + ") VALUES(?," + ",".join("?"*len(cols)) + ")",
                         (week_id, *r.tolist()))
         conn.commit()
+        logger.info("save_week week_id=%s rows=%d", week_id, len(rows))
     finally:
         conn.close()
 
@@ -288,6 +293,8 @@ def save_workspace(week_id: str, ws: dict, db_path: str) -> dict:
              json.dumps(narr_over, ensure_ascii=False),
              datetime.utcnow().isoformat()))
         conn.commit()
+        logger.info("save_workspace week_id=%s proc=%d plan=%d content_len=%d",
+                    week_id, len(proc_items), len(plan_items), len(content))
         return load_workspace(week_id, db_path)
     finally:
         conn.close()

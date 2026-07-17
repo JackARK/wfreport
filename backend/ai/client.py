@@ -1,10 +1,14 @@
 import json
 import os
 import re
+import time
 from pathlib import Path
 import yaml
 
 from backend.ai.prompts import render
+from backend.core.logging_conf import get_logger
+
+logger = get_logger("ai")
 
 _SETTINGS = Path(__file__).resolve().parents[1] / "config" / "settings.yaml"
 
@@ -203,18 +207,14 @@ def _build_body(provider: dict, messages: list, thinking: str | None) -> dict:
 
 
 def call_ai(messages: list, *, provider: str | None = None, thinking: str | None = None) -> str:
-    """Call the active (or named) provider's /chat/completions endpoint.
-    Args:
-        messages  - OpenAI chat messages.
-        provider  - provider id (e.g. "deepseek"). None = default from YAML.
-        thinking  - "disabled" / "enabled" / None. Only meaningful when the
-                    chosen provider supports_thinking.
-    Raises RuntimeError when the API key is missing.
-    """
+    """Call the active (or named) provider's /chat/completions endpoint."""
     p = _resolve_provider(provider)
     if not p.get("api_key"):
         raise RuntimeError(f"{p.get('api_key_env', 'API_KEY')} missing")
     body = _build_body(p, messages, thinking)
+    logger.info("AI 请求 provider=%s model=%s thinking=%s msgs=%d",
+                p.get("provider_id"), p.get("model"), thinking, len(messages))
+    t0 = time.perf_counter()
     import httpx
     resp = httpx.post(
         f"{p['base_url']}/chat/completions",
@@ -223,23 +223,27 @@ def call_ai(messages: list, *, provider: str | None = None, thinking: str | None
         timeout=p.get("timeout_seconds", 30),
     )
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    content = resp.json()["choices"][0]["message"]["content"]
+    logger.info("AI 响应 provider=%s 耗时=%.1fs len=%d",
+                p.get("provider_id"), time.perf_counter() - t0, len(content))
+    return content
 
 
 def generate_section(section: str, vars: dict, *, provider: str | None = None, thinking: str | None = None) -> str:
-    """Plain-text AI output (week_compare / daily_summary).
-    Returns sanitized plain text - no think tags, no markdown, no code fences.
-    """
+    """Plain-text AI output (week_compare / daily_summary)."""
     try:
         return sanitize_text(call_ai(render(section, vars), provider=provider, thinking=thinking))
-    except Exception:
+    except Exception as e:
+        logger.warning("AI section=%s 失败 回退占位 err=%s", section, e)
         return _fallback(section, vars)
 
 
 def generate_json(section: str, vars: dict, *, provider: str | None = None, thinking: str | None = None) -> list:
     """Structured AI output (procurement / next_plan).
-    Returns a list of items, falling back to [] on any parse / network / auth error.
-    Tolerates: think-tag blobs, ```json fences, prefix prose, trailing characters.
+
+    Returns a list of items, falling back to [] on any parse / network /
+    auth error. Tolerates: think-tag blobs, ```json fences, prefix prose,
+    trailing characters.
     """
     try:
         raw = call_ai(render(section, vars), provider=provider, thinking=thinking)

@@ -1,4 +1,9 @@
+import time
 import xlsxwriter
+
+from backend.core.logging_conf import get_logger
+
+logger = get_logger("excel")
 
 
 def _fmt(wb):
@@ -26,6 +31,9 @@ def _shop_pivot(bundle):
 
 def build_excel(bundle, recent_weeks, ai_texts: dict, procurement_items: list,
                 plan_items: list, out_path: str) -> str:
+    t0 = time.perf_counter()
+    logger.info("build_excel START out=%s 采购=%d 计划=%d",
+                out_path, len(procurement_items or []), len(plan_items or []))
     wb = xlsxwriter.Workbook(out_path)
     f = _fmt(wb)
     money = wb.add_format({"num_format": f["money"]})
@@ -161,4 +169,7 @@ def build_excel(bundle, recent_weeks, ai_texts: dict, procurement_items: list,
     )
 
     wb.close()
+    import os as _os
+    logger.info("build_excel DONE → %s size=%.0fKB 总耗时=%.2fs",
+                out_path, _os.path.getsize(out_path) / 1024, time.perf_counter() - t0)
     return out_path

@@ -1,0 +1,23 @@
+services:
+  wfreport:
+    build: .
+    image: wfreport:latest
+    container_name: wfreport
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      # 数据、生成文件、日志 全部映射到容器外部
+      - ./data:/app/data              # SQLite 数据库 (读写)
+      - ./output:/app/output          # 生成的 xlsx / pptx / png (读写)
+      - ./logs:/app/logs              # 应用日志 + 导出快照 (读写)
+      - ./.env:/app/.env:ro           # API keys (只读)
+      - ./resource:/app/resource:ro   # PPT 模板 + 样本 (只读,可替换)
+    environment:
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - WFREPORT_DB_PATH=/app/data/wfreport.db
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
