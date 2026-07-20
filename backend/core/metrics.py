@@ -107,8 +107,8 @@ def compute_all(df: pd.DataFrame) -> MetricsBundle:
     product_top15_daily = (df[df["商品名称"].isin(product_top15["商品名称"])]
                            .groupby(["商品名称", "订单日期"])["销售数量"].sum().reset_index())
 
-    # new products
-    new = df[df["是否新品"] == "是"]
+    # new products (旧格式文件可能没有「是否新品」列 — 视为无新品)
+    new = df[df["是否新品"] == "是"] if "是否新品" in df.columns else df.iloc[0:0]
     if len(new) > 0:
         new_products = new.groupby(["商品编码", "商品名称"]).agg(
             销售数量=("销售数量", "sum"), 销售金额=("销售金额", "sum"),
