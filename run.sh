@@ -46,7 +46,7 @@ warn()   { printf "%s!%s %s\n" "$C_YELLOW" "$C_RESET" "$*"; }
 err()    { printf "%s✗%s %s\n" "$C_RED"   "$C_RESET" "$*" >&2; }
 header() { printf "\n%s%s%s\n" "$C_BOLD$C_BLUE" "$*" "$C_RESET"; }
 
-# ---- pre-flight: find python, node, uv ----
+# ---- pre-flight helpers ----
 # Returns the first executable name that exists in PATH. Pass one or more
 # candidate names; the function does NOT consume the first arg as a label.
 first_exe() {
@@ -57,8 +57,6 @@ first_exe() {
   done
   printf '%s' ""
 }
-
-PY_BIN="$(first_exe python3.12 python3 python)"
 
 # ---- arg parsing ----
 MODE="start"
@@ -86,28 +84,18 @@ while [[ $# -gt 0 ]]; do
 done
 
 # ===========================================================================
-# pre-flight: find python, node, uv
+# pre-flight: find uv, node
 # ===========================================================================
-detect() {
-  local cmd="$1"; shift
-  for c in "$@"; do
-    if command -v "$c" >/dev/null 2>&1; then
-      printf '%s' "$c"; return 0
-    fi
-  done
-  printf '%s' ""
-}
-
-PY_BIN="$(first_exe python3.12 python3 python)"
-if [[ -z "$PY_BIN" ]]; then err "no python3 found in PATH"; exit 1; fi
-PY_VER="$("$PY_BIN" -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")')"
-
+UV_BIN="$(first_exe uv)"
 NODE_BIN="$(first_exe node nodejs)"
 NPM_BIN="$(first_exe npm)"
-USE_UV=0; UV_BIN=""
-if command -v uv >/dev/null 2>&1; then
-  UV_BIN="uv"; USE_UV=1
-fi
+
+require_uv() {
+  if [[ -z "$UV_BIN" ]]; then
+    err "uv not found in PATH — install: curl -LsSf https://astral.sh/uv/install.sh | sh"
+    exit 1
+  fi
+}
 
 # ---- OS helpers ----
 case "$(uname -s 2>/dev/null || echo unknown)" in
@@ -157,10 +145,12 @@ fi
 print_env() {
   header "Environment"
   ok  "repo:        $REPO_ROOT"
-  ok  "python:      $PY_BIN ($PY_VER)"
+  [[ -n "$UV_BIN"   ]] && ok  "uv:          $UV_BIN ($("$UV_BIN" --version | awk '{print $2}'))" || warn "uv:          missing"
   [[ -n "$NODE_BIN" ]] && ok  "node:        $NODE_BIN ($(node -v 2>/dev/null))" || warn "node:        missing"
   [[ -n "$NPM_BIN"  ]] && ok  "npm:         $NPM_BIN"  || warn "npm:         missing"
-  if [[ "$USE_UV" == 1 ]]; then ok "uv:          $UV_BIN (will use for venv)"; fi
+  if [[ -d "$VENV" ]]; then
+    ok "python:      $("$VENV/bin/python" -c 'import platform;print(platform.python_version())') (.venv, managed by uv)"
+  fi
 }
 
 print_env
@@ -172,7 +162,7 @@ if [[ "$MODE" == "check" ]]; then
   header "Backend deps"
   if [[ ! -d "$VENV" ]]; then warn ".venv missing — will be created on first run"
   else ok ".venv present (Python $($VENV/bin/python -c 'import sys;print(f"{sys.version_info.major}.{sys.version_info.minor}")'))"; fi
-  if [[ -f "backend/requirements.txt" && (-d "$VENV") ]]; then
+  if [[ -d "$VENV" ]]; then
     if "$VENV/bin/python" -c "import fastapi, pandas, plotly, kaleido, xlsxwriter, pptx, httpx, yaml, dotenv, openpyxl" 2>/dev/null; then
       ok "backend imports OK"
     else
@@ -203,23 +193,13 @@ fi
 # mode: --install  --------------------------------------------------------
 # ===========================================================================
 ensure_backend_deps() {
+  require_uv
   if [[ ! -d "$VENV" ]]; then
-    header "Creating venv"
-    if [[ "$USE_UV" == 1 ]]; then
-      "$UV_BIN" venv "$VENV" --python "$PY_BIN" >/dev/null
-    else
-      "$PY_BIN" -m venv "$VENV"
-    fi
+    header "Syncing backend deps (uv sync)"
+    "$UV_BIN" sync
     ok "venv created at $VENV"
-  fi
-  if [[ -f "backend/requirements.txt" ]]; then
-    header "Installing backend deps"
-    if [[ "$USE_UV" == 1 ]]; then
-      "$UV_BIN" pip install -r backend/requirements.txt --python "$VENV/bin/python"
-    else
-      "$VENV/bin/pip" install -r backend/requirements.txt
-    fi
-    ok "backend deps installed"
+  else
+    "$UV_BIN" sync --quiet
   fi
 }
 ensure_frontend_deps() {

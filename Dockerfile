@@ -9,6 +9,8 @@ RUN npm run build
 # ---- 阶段 2: 运行时 ----
 FROM python:3.12-slim-bookworm
 
+COPY --from=ghcr.io/astral-sh/uv:0.11.8 /uv /usr/local/bin/uv
+
 ENV DEBIAN_FRONTEND=noninteractive \
     LANG=C.UTF-8 \
     PYTHONUNBUFFERED=1 \
@@ -31,8 +33,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # 先装 Python 依赖(利用 Docker layer cache 加速重建)
-COPY backend/requirements.txt ./
-RUN pip install --no-cache-dir -r requirements.txt
+COPY pyproject.toml uv.lock .python-version ./
+RUN UV_NO_CACHE=1 uv sync --frozen --no-dev
+ENV PATH="/app/.venv/bin:$PATH"
 
 # 拷贝代码 + 资源
 COPY backend/ ./backend/

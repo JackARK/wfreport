@@ -1,0 +1,27 @@
+[project]
+name = "wfreport"
+version = "0.1.0"
+description = "王凡周报生成器：供应链周报 Excel/PPT 自动生成工具"
+requires-python = ">=3.12"
+dependencies = [
+    "fastapi",
+    "uvicorn[standard]",
+    "python-multipart",
+    "python-dotenv",
+    "pandas",
+    "openpyxl",
+    "xlsxwriter",
+    "plotly",
+    "kaleido",
+    "python-pptx",
+    "pyyaml",
+    "httpx",
+]
+
+[dependency-groups]
+dev = [
+    "pytest",
+]
+
+[tool.uv]
+package = false

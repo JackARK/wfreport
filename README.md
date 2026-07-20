@@ -27,11 +27,10 @@ wfreport/
 │   ├── ai/                       # MiniMax 客户端 + prompt 模板
 │   │   ├── client.py             # 无 key 自动 fallback
 │   │   └── prompts.py            # 热加载 prompts.yaml
-│   ├── config/                   # 配置（可编辑）
-│   │   ├── settings.yaml         # 数据库/AI/模板路径
-│   │   ├── platform_map.yaml     # 店铺前缀 → 平台
-│   │   └── prompts.yaml          # 4 处 AI prompt（热加载）
-│   └── requirements.txt
+│   └── config/                   # 配置（可编辑）
+│       ├── settings.yaml         # 数据库/AI/模板路径
+│       ├── platform_map.yaml     # 店铺前缀 → 平台
+│       └── prompts.yaml          # 4 处 AI prompt（热加载）
 ├── frontend/                     # Vue3 + Vite
 │   ├── src/
 │   │   ├── App.vue
@@ -49,24 +48,27 @@ wfreport/
 │   └── 2026年第二十七周周报-王凡.pptx
 ├── data/                         # SQLite（wfreport.db，自动创建）
 ├── output/                       # 产物根目录（<week_id>/xlsx+pptx+png）
+├── pyproject.toml                # Python 依赖声明（uv 管理）
+├── uv.lock                       # 依赖锁定文件
+├── .python-version               # Python 版本钉定（3.12）
 ├── .env.example
 └── README.md
 ```
 
 ## 3. 环境与安装
 
-- **Python**：3.12（推荐）
+- **uv**：管理 Python 环境（`curl -LsSf https://astral.sh/uv/install.sh | sh`），Python 3.12 由 uv 按 `.python-version` 自动下载，无需系统预装
 - **Node.js**：18+（用于前端构建）
 
 ```bash
-# 后端依赖
-pip install -r backend/requirements.txt
+# 后端依赖（创建 .venv 并按 uv.lock 安装，含 pytest）
+uv sync
 
 # 前端依赖
 npm --prefix frontend install
 ```
 
-> 图表渲染依赖 `kaleido`（已包含在 requirements.txt）。首次执行 PNG 渲染可能略慢，属正常现象。
+> 图表渲染依赖 `kaleido`（已声明在 pyproject.toml）。首次执行 PNG 渲染可能略慢，属正常现象。
 
 ## 4. 配置
 
