@@ -67,6 +67,53 @@ def test_generate_json_parses_on_success(monkeypatch):
     assert out == payload
 
 
+# ---------- request-failure fallback (key present but call fails) ----------
+
+_WC_VARS = {"cur_amount": "200", "cur_profit": "50", "cur_margin": "25",
+            "prev_amount": "1", "prev_profit": "1", "prev_margin": "1",
+            "amount_delta": "+20", "amount_delta_rate": "0",
+            "profit_delta": "0", "profit_delta_rate": "0", "margin_delta_pct": "0"}
+
+
+def test_generate_section_falls_back_on_network_error(monkeypatch):
+    """有 key 但请求抛异常 (网络/超时) → 回退占位文案且含业务数值。"""
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    with mock.patch("backend.ai.client.call_ai", side_effect=ConnectionError("boom")):
+        out = generate_section("week_compare", _WC_VARS)
+    assert "200" in out and "50" in out
+
+
+def test_generate_section_falls_back_on_http_error(monkeypatch):
+    """httpx 层 HTTP 状态错误 → 同样回退占位文案，不向上抛。"""
+    import httpx
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+
+    def fake_post(url, headers=None, json=None, timeout=None):
+        resp = mock.Mock()
+        resp.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "500", request=mock.Mock(), response=mock.Mock())
+        return resp
+
+    monkeypatch.setattr("httpx.post", fake_post)
+    out = generate_section("week_compare", _WC_VARS)
+    assert "200" in out
+
+
+def test_generate_json_returns_empty_on_network_error(monkeypatch):
+    """结构化输出请求失败 → 空列表，主流程不中断。"""
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    with mock.patch("backend.ai.client.call_ai", side_effect=TimeoutError("slow")):
+        assert generate_json("procurement", {"user_input": "x"}) == []
+        assert generate_json("next_plan", {"user_input": "x"}) == []
+
+
+def test_generate_json_returns_empty_on_garbage_output(monkeypatch):
+    """AI 返回非 JSON 垃圾 → 空列表而不是异常。"""
+    monkeypatch.setenv("MINIMAX_API_KEY", "fake-key")
+    with mock.patch("backend.ai.client.call_ai", return_value="这不是JSON<think>也没闭合"):
+        assert generate_json("procurement", {"user_input": "x"}) == []
+
+
 # ---------- multi-provider resolution ----------
 
 def test_resolve_provider_default(monkeypatch):

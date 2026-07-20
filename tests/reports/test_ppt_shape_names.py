@@ -24,8 +24,8 @@ _EXPECTED = {
 def _pngs(d):
     paths = {}
     for name in ["overview", "daily", "brand_combo", "brand_pie", "platform",
-                 "shop_heatmap", "product_combo", "product_heatmap", "new_products",
-                 "three_weeks", "factory"]:
+                 "shop_heatmap", "product_horizontal", "product_table",
+                 "product_heatmap", "new_products", "three_weeks", "factory"]:
         p = os.path.join(d, name + ".png")
         with open(p, "wb") as f:
             f.write(_VALID_PNG)

@@ -9,7 +9,7 @@ def test_build_excel():
     b = compute_all(load_excel("resource/本周.xlsx"))
     p = os.path.join(tempfile.mkdtemp(), "r.xlsx")
     out = build_excel(b, [], {"week_compare": "测试", "daily_summary": "",
-                              "procurement": "", "next_plan": ""}, p)
+                              "procurement": "", "next_plan": ""}, [], [], p)
     assert os.path.exists(out)
 
 
@@ -24,7 +24,7 @@ def test_build_excel_has_all_sheets_and_native_chart():
     ]
     p = os.path.join(tempfile.mkdtemp(), "r.xlsx")
     build_excel(b, recent, {"week_compare": "测试", "daily_summary": "",
-                            "procurement": "", "next_plan": ""}, p)
+                            "procurement": "", "next_plan": ""}, [], [], p)
     wb = openpyxl.load_workbook(p)
     expected = {"汇总", "每日", "品牌", "平台", "店铺", "产品", "工厂", "AI文案"}
     assert expected.issubset(set(wb.sheetnames))
