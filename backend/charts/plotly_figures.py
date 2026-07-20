@@ -34,7 +34,9 @@ def fig_daily(b) -> go.Figure:
     line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(n)]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=xs, y=d["销售金额"], name="销售额",
-                         text=[_wan(v) for v in d["销售金额"]], textposition="outside",
+                         text=[_wan(v) for v in d["销售金额"]], textposition="inside",
+                         insidetextanchor="start",
+                         textfont=dict(color="white"),
                          marker_color=_PALETTE["blue"]), secondary_y=False)
     fig.add_trace(go.Scatter(x=xs, y=d["销售毛利率"], name="毛利率",
                              text=[_pct(v) for v in d["销售毛利率"]],
@@ -286,11 +288,18 @@ def fig_product_table(b) -> go.Figure:
 def fig_new_products(b) -> go.Figure:
     d = b.new_products
     if d.empty:
-        return go.Figure().update_layout(title="无新品")
+        return go.Figure().update_layout(
+            title="无新品",
+            xaxis=dict(visible=False), yaxis=dict(visible=False),
+            annotations=[dict(text="本周无新品", xref="paper", yref="paper",
+                              x=0.5, y=0.5, showarrow=False,
+                              font=dict(size=16, color="#94a3b8"))])
     line_text_pos = ["top center" if i % 2 == 0 else "bottom center" for i in range(len(d))]
     fig = make_subplots(specs=[[{"secondary_y": True}]])
     fig.add_trace(go.Bar(x=d["商品名称"], y=d["销售数量"], name="数量",
-                         text=d["销售数量"].tolist(), textposition="outside",
+                         text=d["销售数量"].tolist(), textposition="inside",
+                         insidetextanchor="start",
+                         textfont=dict(color="white"),
                          marker_color=_PALETTE["purple"]), secondary_y=False)
     fig.add_trace(go.Scatter(x=d["商品名称"], y=d["销售毛利率"], name="毛利率",
                              text=[_pct(v) for v in d["销售毛利率"]],
@@ -307,8 +316,13 @@ def fig_three_weeks_table(recent_weeks: list) -> go.Figure:
              [_wan(w["销售额"]) for w in recent_weeks],
              [_wan(w["销售毛利"]) for w in recent_weeks],
              [_pct(w["销售毛利率"]) for w in recent_weeks]]
-    fig = go.Figure(go.Table(header=dict(values=headers), cells=dict(values=cells)))
-    fig.update_layout(title="最近三周")
+    # PPT 槽位矮 (~220px) — 行高/边距必须收紧, 否则数据行被裁掉
+    fig = go.Figure(go.Table(
+        header=dict(values=headers, height=24, font=dict(size=12)),
+        cells=dict(values=cells, height=22, font=dict(size=12)),
+    ))
+    fig.update_layout(title=dict(text="最近三周", font=dict(size=13)),
+                      margin=dict(l=10, r=10, t=36, b=4))
     return fig
 
 
