@@ -102,6 +102,30 @@ def duplicate_slide(prs, index: int):
     return new
 
 
+def move_slide(prs, from_idx: int, to_idx: int):
+    """Reorder a slide by manipulating the sldIdLst XML directly.
+    `to_idx` is the position the slide occupies after the move."""
+    sldIdLst = prs.slides._sldIdLst
+    elems = list(sldIdLst)
+    el = elems[from_idx]
+    sldIdLst.remove(el)
+    sldIdLst.insert(to_idx, el)
+
+
+def find_slide_by_title(prs, title: str, *, last: bool = False) -> int | None:
+    """Return the index of the slide that has a text shape whose stripped
+    text equals `title` exactly. `last=True` picks the last match (skips
+    the TOC slide, which repeats section titles)."""
+    found = None
+    for i, slide in enumerate(prs.slides):
+        for sh in slide.shapes:
+            if sh.has_text_frame and sh.text_frame.text.strip() == title:
+                found = i if last else (found if found is not None else i)
+                if not last:
+                    return found
+    return found
+
+
 def delete_slide(prs, slide_index: int):
     """Remove a slide from the presentation by index. python-pptx has no
     built-in API for this so we manipulate the sldIdLst XML directly.
@@ -159,7 +183,7 @@ def fill_table(table, items: list, col_keys: list, start_row: int = 1, start_no:
 
 
 def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
-              plan_items, week_meta, out_path) -> str:
+              plan_items, week_meta, out_path, has_new_products: bool = True) -> str:
     t0 = time.perf_counter()
     logger.info("build_ppt START template=%s out=%s week=%s 采购=%d 计划=%d",
                 template_path, out_path, week_meta.get("week_id"),
@@ -192,32 +216,27 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     # 页9 产品
     set_text(S[9], "文本框 5", narratives.get("product", ""))
     replace_picture(S[9], 0, png_paths["product_horizontal"])
-    # 复制页9 为 9' 放新品
-    new9 = duplicate_slide(prs, 9)
-    for sh in new9.shapes:
-        if sh.has_text_frame and "文本框 5" in sh.name:
-            sh.text_frame.text = narratives.get("new", "")
-    # P0-#4: drop the inherited product chart's rel (and any other
-    # picture rels the duplicate brought along) before adding the
-    # new_products chart. Use replace_picture so the geometry + rel
-    # cleanup logic is consistent with the main picture swap.
-    if _picture_shapes(new9):
-        replace_picture(new9, 0, png_paths["new_products"])
     # 页10 工厂 (供应商 TOP5)
     replace_picture(S[10], 0, png_paths["factory"])
     # 采购自动分页 (页13,14,15 in 1-indexed -> [12,13,14] 0-indexed)
-    # - Add pages if items > 12
+    # - Add pages if items > 12; inserted right after the procurement block
+    #   so they never land behind the THANKS page.
     # - DELETE unused template pages when items < 12, otherwise the leftover
     #   template content ("京东自营及猫超产品入库" etc.) ships in the PPT.
+    # - 0 items: keep exactly 1 page filled with an empty (header-only) table
+    #   so the 采购情况 section never ships with zero content pages.
     max_per = 4
     chunks = [procurement_items[i:i + max_per] for i in range(0, len(procurement_items), max_per)]
     proc_pages = [12, 13, 14]
     while len(chunks) > len(proc_pages):
-        dup = duplicate_slide(prs, proc_pages[-1])
-        proc_pages.append(len(prs.slides) - 1)
-    logger.info("采购自动分页 chunks=%d proc_pages=%s", len(chunks), proc_pages)
+        duplicate_slide(prs, proc_pages[-1])
+        move_slide(prs, len(prs.slides) - 1, proc_pages[-1] + 1)
+        proc_pages.append(proc_pages[-1] + 1)
+    keep = max(len(chunks), 1)
+    logger.info("采购自动分页 chunks=%d proc_pages=%s keep=%d", len(chunks), proc_pages, keep)
     running_no = 1
-    for pi, chunk in enumerate(chunks):
+    for pi in range(keep):
+        chunk = chunks[pi] if pi < len(chunks) else []
         slide = prs.slides[proc_pages[pi]]
         for sh in slide.shapes:
             if sh.has_table:
@@ -225,14 +244,45 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
                             proc_pages[pi] + 1, len(chunk), running_no)
                 fill_table(sh.table, chunk, ["事项内容", "进度及责任人", "状态", "完成时间"], start_no=running_no)
         running_no += len(chunk)
+    # 新品页 — 有新品时复制页9 放新品图，稍后插入到「下周规划」分隔页之前；
+    # 无新品时整页不生成。复制必须在删除多余采购页之前做：python-pptx 的
+    # add_slide 按 len(slides)+1 分配 partname，先删后加会与现存 slide 的
+    # partname 撞名，保存出 duplicate zip 条目。
+    new9 = None
+    if has_new_products:
+        new9 = duplicate_slide(prs, 9)
+        for sh in new9.shapes:
+            if sh.has_text_frame and "文本框 5" in sh.name:
+                sh.text_frame.text = narratives.get("new", "")
+            elif sh.has_text_frame and sh.text_frame.text.strip() == "销售表现-产品分析":
+                sh.text_frame.text = "销售表现-新品分析"
+        # P0-#4: drop the inherited product chart's rel (and any other
+        # picture rels the duplicate brought along) before adding the
+        # new_products chart. Use replace_picture so the geometry + rel
+        # cleanup logic is consistent with the main picture swap.
+        if _picture_shapes(new9):
+            replace_picture(new9, 0, png_paths["new_products"])
+    else:
+        logger.info("无新品 — 跳过新品页")
+
     # P0-#3: drop unused procurement slides. We must do this AFTER the
     # fill_table loop so all the slides we're keeping have their data in
     # place. Delete in DESCENDING index order so earlier deletions don't
     # shift the indexes of later ones.
-    for unused_idx in sorted([proc_pages[i] for i in range(len(chunks), len(proc_pages))],
+    for unused_idx in sorted([proc_pages[i] for i in range(keep, len(proc_pages))],
                              reverse=True):
         delete_slide(prs, unused_idx)
         logger.info("删除多余采购 slide idx=%d", unused_idx)
+
+    if new9 is not None:
+        # 删除采购页后 new9 的索引已前移，按 slide_id 重新定位再移动。
+        new9_idx = next(i for i, s in enumerate(prs.slides) if s.slide_id == new9.slide_id)
+        plan_divider_idx = find_slide_by_title(prs, "下周规划", last=True)
+        if plan_divider_idx is not None:
+            move_slide(prs, new9_idx, plan_divider_idx)
+            logger.info("新品页插入到 slide idx=%d (下周规划 之前)", plan_divider_idx)
+        else:
+            logger.warning("未找到「下周规划」分隔页 — 新品页保留在末尾")
 
     # 下周计划 — locate the slide by content rather than by index. The
     # procurement-slide deletion above shifts indexes by -1, which used

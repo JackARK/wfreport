@@ -294,7 +294,8 @@ def generate(week_id: str, payload: dict):
     pptx = os.path.join("output", week_id, f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(_tpath(payload),
-              pngs, ai_texts, narratives, procurement_items, plan_items, week_meta, pptx)
+              pngs, ai_texts, narratives, procurement_items, plan_items, week_meta, pptx,
+              has_new_products=len(bundle.new_products) > 0)
     logger.info("PPT 生成完成 week_id=%s path=%s", week_id, pptx)
     return {"excel": f"/api/download/{week_id}/{week_id}.xlsx",
             "ppt": f"/api/download/{week_id}/{week_id}.pptx"}
@@ -402,7 +403,8 @@ def build_full(week_id: str, payload: dict = Body(default={})):
     pptx = str(week_dir / f"{week_id}.pptx")
     pngs["factory"] = pngs.get("factory") or pngs["three_weeks"]
     build_ppt(_tpath(payload),
-              pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx)
+              pngs, ai_texts, narratives, proc_items, plan_items, week_meta, pptx,
+              has_new_products=len(bundle.new_products) > 0)
     logger.info("PPT 生成 week_id=%s size=%.0fKB 总耗时=%.1fs",
                 week_id, os.path.getsize(pptx) / 1024, time.perf_counter() - t0)
 
