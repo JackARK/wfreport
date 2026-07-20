@@ -1,8 +1,8 @@
 import axios from 'axios'
 
 // Dev: vite dev server proxies /api to :8000 (see vite.config.js).
-// Prod: served by uvicorn on the same origin, so a relative path works.
-const base = import.meta.env.DEV ? 'http://localhost:8000' : ''
+// Prod: same-origin; honor vite base (e.g. /wfreport/ behind a path gateway).
+const base = import.meta.env.DEV ? 'http://localhost:8000' : import.meta.env.BASE_URL.replace(/\/$/, '')
 
 // ---- upload / legacy ----
 export const upload        = (file) => { const fd = new FormData(); fd.append('file', file); return axios.post(base+'/api/upload', fd) }

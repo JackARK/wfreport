@@ -71,6 +71,12 @@ uv run pytest tests/test_integration.py -v   # 集成：load_excel→compute_all
 - 阶段 2 用 uv（`COPY --from=ghcr.io/astral-sh/uv`）按 `pyproject.toml` + `uv.lock` 执行 `uv sync --frozen --no-dev` 装依赖，`.venv/bin` 加入 `PATH`。
 - 镜像内安装 **chromium + Noto CJK 中文字体**（kaleido 导出中文 PNG 必须），并用 `KALEIDO_CHROME_PATH=/usr/bin/chromium` 指向系统 chromium。
 - compose 挂载 `./data`、`./output`、`./logs`（读写）和 `./.env`、`./resource`（只读），端口 8000，健康检查打 `/api/ai/providers`。
+- **前端以 `--base=/wfreport/` 构建**（Dockerfile 里），`api.js`/`App.vue` 用 `import.meta.env.BASE_URL` 拼 API 路径——支持网关子路径部署；同源裸部署（base=/）行为不变。
+
+## 公网网关（本机部署形态）
+
+- 入口 **http://hc.wwszxc.tax:20755/**（= frp `frpc-hc.ini` 里 SSH 远程端口 20754 + 1）。frp 客户端配置在 `~/workplace/tools/frp/frp/frpc-web.ini`（独立进程 + 用户 crontab `@reboot`，20755→本机 8079；主配置 `frpc-hc.ini` 由 root 跑 SSH 映射，未动）。
+- nginx 网关容器 `nginx-gateway`（host 网络，listen 8079，配置 `~/workplace/tools/nginx-gateway/`）：`/` 是静态跳板页，按路径反代各容器服务——`/wfreport/`→:8000、`/blog/`→:8090、`/portainer/`→:9100、`/clash/`→:1234。新增容器服务时在 `nginx.conf` 加 location + 跳板页加卡片，`docker restart nginx-gateway` 生效。
 
 ## 配置与密钥
 

@@ -58,7 +58,7 @@ onMounted(async () => {
   const storedVer = localStorage.getItem('wfreport.onboarding.version')
   if (dismissed && storedVer === APP_VERSION) return
   try {
-    const r = await fetch('/api/history')
+    const r = await fetch(`${import.meta.env.BASE_URL.replace(/\/$/, '')}/api/history`)
     const data = await r.json()
     const hasHistory = (data?.recent || []).length > 0
     if (hasHistory && dismissed) return

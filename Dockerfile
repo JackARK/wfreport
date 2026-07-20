@@ -4,7 +4,7 @@ WORKDIR /app/frontend
 COPY frontend/package*.json ./
 RUN npm ci --no-audit --no-fund
 COPY frontend/ ./
-RUN npm run build
+RUN npm run build -- --base=/wfreport/
 
 # ---- 阶段 2: 运行时 ----
 FROM python:3.12-slim-bookworm
