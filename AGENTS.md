@@ -81,7 +81,7 @@ uv run pytest tests/test_integration.py -v   # 集成：load_excel→compute_all
 ## 配置与密钥
 
 - `.env`（已被 `.gitignore` 忽略）经 `python-dotenv` 在 `backend/app/main.py` 加载，模板见 `.env.example`。
-- **三家 AI provider**：`MINIMAX_API_KEY` / `DEEPSEEK_API_KEY` / `KIMI_API_KEY`，至少填一个。三者均兼容 OpenAI `/chat/completions`，注册表在 `backend/config/settings.yaml` 的 `ai.providers` 下，运行时可在前端下拉框切换；DeepSeek/Kimi 支持 thinking 开关。**缺 key 不报错**——AI 调用自动回退占位文案（见 `backend/ai/client.py`）。
+- **四家 AI provider**：`MINIMAX_API_KEY` / `DEEPSEEK_API_KEY` / `KIMI_API_KEY` / `GLM_API_KEY`，至少填一个。四家均兼容 OpenAI `/chat/completions`，注册表在 `backend/config/settings.yaml` 的 `ai.providers` 下，运行时可在前端下拉框切换；DeepSeek/Kimi/GLM 支持 thinking 开关。注意 key 类型与端点匹配：Kimi 用 **Kimi For Coding** key（端点 `https://api.kimi.com/coding/v1`，模型 `k3`，不是 Moonshot 开放平台的 `api.moonshot.cn`）；智谱用 **GLM Coding Plan** key（端点 `https://open.bigmodel.cn/api/coding/paas/v4`，模型 `glm-5.2`）。**缺 key 不报错**——AI 调用自动回退占位文案（见 `backend/ai/client.py`）。
 - `backend/config/` 三份 YAML 可手工编辑：
   - `settings.yaml`：`db_path` / `output_dir` / `template_path` / AI provider 配置。
   - `platform_map.yaml`：店铺前缀（按 `-` 切分第 0 段）→ 平台名；未命中归「其他」。
@@ -93,14 +93,14 @@ uv run pytest tests/test_integration.py -v   # 集成：load_excel→compute_all
 - **毛利率一律加权**：`Σ销售毛利 / Σ销售金额`（按分组聚合后一次计算）。绝不对行级 `销售毛利率` 取算术平均（会偏 ~0.5pp）。样例周全表毛利率 50.1%。
 - **`week_id` 每次上传只有一个值** = `df["订单日期"].min()`（起始日期）所属 ISO 周，格式 `YYYY-Www`。不要逐行算——一周数据可能跨两个 ISO 周，但业务上是一周。
 - **平台派生**：`店铺` 按 `-` 切分取第 0 段，查 `platform_map.yaml`，未命中 → 「其他」。
-- **TOP 排名**：店铺 TOP15、产品 TOP15、工厂 TOP5 一律按 `Σ销售数量` 降序。
+- **TOP 排名**：店铺 TOP15、产品 TOP15 一律按 `Σ销售数量` 降序；工厂同样按 `Σ销售数量` 降序——供应商图表（PPT P11 / Web 预览）用 TOP15（`factory_top15`），Excel「工厂」sheet 仍 TOP5（`factory_top5`）。
 - 样例数据：`resource/上周.xlsx` 16 列（无 `是否新品`），`resource/本周.xlsx` 17 列，`resource/下周.xlsx` 15 列（聚合口径：`渠道`/`日期`、无 `线上订单号`/`是否新品`）。`parser.load_excel` 统一归一：`渠道→店铺`、`日期→订单日期`、缺 `线上订单号` 补 `SYN-<i>`、缺 `是否新品` 补「否」——下游（metrics/history）不需要再判空。指标只对新上传的当周文件计算。
 
 ## 输出物与图表引擎
 
 - **Plotly 是唯一权威图表引擎**：Web 端交互渲染（`backend/reports/web_report.py`），PPT 用图经 `backend/charts/render_png.py` 由 kaleido 导出 PNG。图集合固定 **12 个 key**：`overview, daily, brand_combo, brand_pie, platform, shop_heatmap, product_horizontal, product_table, product_heatmap, new_products, three_weeks, factory`。
 - **Excel**（`backend/reports/excel_builder.py`）用 **xlsxwriter 原生图表**（可编辑对象，不是图片）——目前只有「汇总」combo 图，分 sheet 图表是已知后续项。
-- **PPT**（`backend/reports/ppt_builder.py`）填充模板 `resource/2026年第二十七周周报-王凡.pptx`：按 slide 替换 PICTURE/TEXT/TABLE 形状；**新品页按 `has_new_products` 条件生成**（调用方传 `len(bundle.new_products) > 0`）——有新品时复制第 9 页、改标题「销售表现-新品分析」并用 `move_slide` 插到「下周规划」分隔页之前，无新品时整页不生成；采购表自动分页且序号连续，增页插入采购区块内（不会跑到 THANKS 后），**0 条采购保底留 1 页空表**。注意：新增 slide 必须先于任何删除做（python-pptx 按 `len(slides)+1` 分配 partname，先删后加会撞名产生 duplicate zip 条目）。形状名已对真实模板核对过（有 `tests/reports/test_ppt_shape_names.py` 守护），改名字前先查模板文件。
+- **PPT**（`backend/reports/ppt_builder.py`）填充模板 `resource/2026年第二十七周周报-王凡.pptx`：按 slide 替换 PICTURE/TEXT/TABLE 形状，图片一律等比居中适配槽位（contain-fit，不拉伸）。P4（销售表现页）有两个图片槽：**顶部长条槽放三周对比表、右下槽放每日销售图**（overview 图只用于 Web 预览，不进 PPT）；同页多图替换必须先快照占位形状再按形状替换——连续按索引 `replace_picture(0/1)` 会命中刚插入的新图（旧 bug：三周表被压进右下槽、长条槽残留模板旧图）。**新品页按 `has_new_products` 条件生成**（调用方传 `len(bundle.new_products) > 0`）——有新品时复制第 9 页、改标题「销售表现-新品分析」并用 `move_slide` 插到「下周规划」分隔页之前，无新品时整页不生成；采购表自动分页且序号连续，增页插入采购区块内（不会跑到 THANKS 后），**0 条采购保底留 1 页空表**。注意：新增 slide 必须先于任何删除做（python-pptx 按 `len(slides)+1` 分配 partname，先删后加会撞名产生 duplicate zip 条目）。形状名已对真实模板核对过（有 `tests/reports/test_ppt_shape_names.py` 守护），改名字前先查模板文件。
 - **产物/布局自检脚本** `scripts/gen_check.py`（非 pytest）：`uv run python scripts/gen_check.py` 用三周样例数据生成 PPT+PNG 到 `/tmp/wfcheck/`，检查 zip duplicate 条目与形状越界（分隔页背景图是满版出血设计，越界属正常）。
 
 ## 代码组织速查

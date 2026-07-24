@@ -119,15 +119,16 @@ def fig_brand_pie(b) -> go.Figure:
     # square) PPT slot without leaving a huge empty band on the right.
     fig = go.Figure(go.Pie(labels=labels, values=values, textinfo="label+percent",
                            textposition="inside", insidetextorientation="horizontal",
+                           textfont=dict(size=26),
                            hole=0.45,
                            marker=dict(colors=[_PALETTE["blue"], _PALETTE["green"]])))
     fig.update_layout(
         title=dict(text="品牌销售数量占比", x=0.02, xanchor="left",
-                   font=dict(size=14)),
+                   font=dict(size=28)),
         showlegend=True,
         legend=dict(orientation="v", x=1.02, y=0.5, yanchor="middle",
-                    font=dict(size=11)),
-        margin=dict(t=40, b=20, l=20, r=20),
+                    font=dict(size=22)),
+        margin=dict(t=60, b=20, l=20, r=20),
     )
     return fig
 
@@ -311,26 +312,49 @@ def fig_new_products(b) -> go.Figure:
     return fig
 
 def fig_three_weeks_table(recent_weeks: list) -> go.Figure:
-    headers = ["周标识", "销售额", "销售毛利", "销售毛利率"]
-    cells = [[w["week_id"] for w in recent_weeks],
-             [_wan(w["销售额"]) for w in recent_weeks],
-             [_wan(w["销售毛利"]) for w in recent_weeks],
-             [_pct(w["销售毛利率"]) for w in recent_weeks]]
-    # PPT 槽位矮 (~220px) — 行高/边距必须收紧, 否则数据行被裁掉
+    """三周对比表, 版式对齐 PPT 模板的蓝底样式: 周为列组 (每周 销售额/销售毛利/
+    毛利率 三列), 首行周标识 + 次行指标名均为蓝底白字, 数据行白底。
+    PPT 槽位是 11.3x1.77in 的矮长条 (~1400x220px) — 无标题、边距收紧。"""
+    blue = "#2e75b6"
+    header = ["项目\\时间"]
+    sub = [""]
+    row = ["合计"]
+    for w in recent_weeks:
+        header += [w["week_id"], "", ""]
+        sub += ["销售额", "销售毛利", "毛利率"]
+        row += [_wan(w["销售额"]), _wan(w["销售毛利"]), _pct(w["销售毛利率"])]
+    ncols = len(header)
     fig = go.Figure(go.Table(
-        header=dict(values=headers, height=24, font=dict(size=12)),
-        cells=dict(values=cells, height=22, font=dict(size=12)),
+        columnwidth=[120] + [100] * (ncols - 1),
+        header=dict(values=header, fill_color=blue, align="center", height=44,
+                    font=dict(color="white", size=20),
+                    line=dict(color="white", width=1)),
+        cells=dict(values=[[sub[i], row[i]] for i in range(ncols)],
+                   fill_color=[[blue, "white"] for _ in range(ncols)],
+                   align="center", height=40,
+                   font=dict(size=18,
+                             color=[["white", "#111827"] for _ in range(ncols)]),
+                   line=dict(color="#9db8d2", width=1)),
     ))
-    fig.update_layout(title=dict(text="最近三周", font=dict(size=13)),
-                      margin=dict(l=10, r=10, t=36, b=4))
+    fig.update_layout(margin=dict(l=2, r=2, t=2, b=2))
     return fig
 
 
 def fig_factory_table(b) -> go.Figure:
-    d = b.factory_top5
+    d = b.factory_top15
+    n = len(d)
     headers = ["工厂", "销售数量", "销售额", "销售毛利率"]
     cells = [d["工厂"].tolist(), [int(x) for x in d["销售数量"]],
              [_wan(x) for x in d["销售金额"]], [_pct(x) for x in d["销售毛利率"]]]
-    fig = go.Figure(go.Table(header=dict(values=headers), cells=dict(values=cells)))
-    fig.update_layout(title="供应商(TOP5)")
+    fig = go.Figure(go.Table(
+        columnwidth=[220, 90, 90, 90],
+        header=dict(values=headers, fill_color="#1f2937", height=40,
+                    font=dict(color="white", size=22),
+                    align=["left", "right", "right", "right"]),
+        cells=dict(values=cells, height=36, font=dict(size=20, color="#111827"),
+                   fill_color=[["#f8fafc" if i % 2 == 0 else "#ffffff" for i in range(n)]],
+                   align=["left", "right", "right", "right"]),
+    ))
+    fig.update_layout(title=(f"供应商(TOP{n})" if n else "无供应商数据"),
+                      margin=dict(l=10, r=10, t=50, b=10))
     return fig

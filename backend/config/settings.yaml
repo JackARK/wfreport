@@ -45,12 +45,21 @@ ai:
       temperature: 0.6
       timeout_seconds: 60
     kimi:
-      name: "Kimi (kimi-k2.6 · Moonshot)"
-      base_url: "https://api.moonshot.cn/v1"
-      model: "kimi-k2.6"
+      name: "Kimi K3 (Kimi For Coding)"
+      base_url: "https://api.kimi.com/coding/v1"
+      model: "k3"
       api_key_env: "KIMI_API_KEY"
       supports_thinking: true
-      thinking_disabled_body_patch: {}    # Kimi disables thinking via model name; nothing to patch
+      thinking_disabled_body_patch: {}    # Kimi 关闭 thinking 会被路由到 K2.6, 保持开启; 无需 patch
+      temperature: 0.6
+      timeout_seconds: 60
+    glm:
+      name: "智谱 GLM-5.2 (Coding Plan)"
+      base_url: "https://open.bigmodel.cn/api/coding/paas/v4"
+      model: "glm-5.2"
+      api_key_env: "GLM_API_KEY"
+      supports_thinking: true
+      thinking_disabled_body_patch: {}    # GLM reasoning 走独立字段, 不影响 content; 无需 patch
       temperature: 0.6
       timeout_seconds: 60
 

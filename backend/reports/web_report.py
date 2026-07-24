@@ -26,7 +26,7 @@ def build_report_json(bundle, recent_weeks) -> dict:
         "tables": {
             "brand": bundle.brand.to_dict("records"),
             "platform": bundle.platform.to_dict("records"),
-            "factory": bundle.factory_top5.to_dict("records"),
+            "factory": bundle.factory_top15.to_dict("records"),
             "new_products": bundle.new_products.to_dict("records"),
             "product_top15": bundle.product_top15.to_dict("records"),
         },

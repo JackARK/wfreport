@@ -17,6 +17,7 @@ class MetricsBundle:
     product_top15_daily: pd.DataFrame
     new_products: pd.DataFrame
     factory_top5: pd.DataFrame
+    factory_top15: pd.DataFrame
 
 
 def _fmt_summary(label: str, df: pd.DataFrame) -> str:
@@ -120,14 +121,17 @@ def compute_all(df: pd.DataFrame) -> MetricsBundle:
         new_products = pd.DataFrame(columns=["商品编码", "商品名称", "销售数量", "销售金额", "销售毛利率"])
         logger.info("new_products: 数据中无新品 (是否新品!=是), 返回空表")
 
-    # factory TOP5
+    # factory — Excel 明细保留 TOP5; PPT/Web 供应商图用 TOP15
     factory = df.groupby("工厂").agg(
         销售数量=("销售数量", "sum"), 销售金额=("销售金额", "sum"),
         销售毛利=("销售毛利", "sum")).reset_index()
     factory["销售毛利率"] = factory["销售毛利"] / factory["销售金额"]
-    factory_top5 = factory.sort_values("销售数量", ascending=False).head(5)
-    logger.info("factory TOP5 (by 销售数量): %s", _fmt_summary("factory", factory_top5))
+    factory = factory.sort_values("销售数量", ascending=False)
+    factory_top5 = factory.head(5)
+    factory_top15 = factory.head(15)
+    logger.info("factory TOP15 (by 销售数量): %s", _fmt_summary("factory", factory_top15))
 
     logger.info("compute_all DONE 总耗时=%.3fs", time.perf_counter() - t0)
     return MetricsBundle(overview, daily, brand, platform, shop_top15_daily,
-                         product_top15, product_top15_daily, new_products, factory_top5)
+                         product_top15, product_top15_daily, new_products,
+                         factory_top5, factory_top15)

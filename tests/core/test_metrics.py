@@ -21,6 +21,8 @@ def test_compute_all_shapes():
     assert b.product_top15["商品名称"].is_unique
     assert len(b.product_top15) <= 15
     assert len(b.factory_top5) == 5
+    assert len(b.factory_top15) == min(15, df["工厂"].nunique())
+    assert b.factory_top15["销售数量"].is_monotonic_decreasing
     assert len(b.new_products["商品编码"].unique()) == 1  # 仅1个新品
     # 数量占比和约等于1
     assert abs(b.brand["数量占比"].sum() - 1.0) < 1e-6

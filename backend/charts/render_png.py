@@ -142,7 +142,7 @@ def _build_chart_args(name: str, bundle, recent_weeks: list) -> dict:
     if name == "three_weeks":
         return {"recent_weeks": recent_weeks}
     if name == "factory":
-        return {"bundle.factory_top5": bundle.factory_top5}
+        return {"bundle.factory_top15": bundle.factory_top15}
     return {}
 
 

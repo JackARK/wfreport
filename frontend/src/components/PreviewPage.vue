@@ -22,7 +22,7 @@ const figures = [
   { key: 'product_heatmap', title: '产品热力 TOP15', desc: '日 × 产品 销售数量', kind: 'chart' },
   { key: 'new_products',    title: '新品表现',   desc: '本周新品指标',       kind: 'chart' },
   { key: 'three_weeks',     title: '近三周对比', desc: '跨周趋势表',         kind: 'table' },
-  { key: 'factory',         title: '工厂 TOP5',  desc: '工厂交付表现',       kind: 'table' },
+  { key: 'factory',         title: '工厂 TOP15', desc: '工厂交付表现',       kind: 'table' },
 ]
 
 async function load() {

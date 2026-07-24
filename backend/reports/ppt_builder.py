@@ -1,5 +1,6 @@
 import copy
 import time
+from PIL import Image
 from pptx import Presentation
 
 from backend.core.logging_conf import get_logger
@@ -43,9 +44,27 @@ def _picture_shapes(slide):
     return [s for s in slide.shapes if s.shape_type == 13]  # PICTURE
 
 
-def replace_picture(slide, which: int, png_path: str):
-    """Swap a picture in-place: capture its geometry, remove the old <p:pic>
-    element from spTree, and insert the new picture at the same anchor.
+def _fit_inside(img_w: int, img_h: int, left: int, top: int, width: int, height: int):
+    """Contain-fit `img_w x img_h` (px) inside the placeholder box (EMU),
+    centered, preserving aspect. Without this, add_picture(width=, height=)
+    stretches the chart whenever the PNG aspect != slot aspect."""
+    if img_w and img_h and width and height:
+        box_ar = width / height
+        img_ar = img_w / img_h
+        if img_ar > box_ar:
+            new_w, new_h = width, int(round(width / img_ar))
+        else:
+            new_h, new_w = height, int(round(height * img_ar))
+        left += (width - new_w) // 2
+        top += (height - new_h) // 2
+        width, height = new_w, new_h
+    return left, top, width, height
+
+
+def _replace_picture_shape(slide, old, png_path: str):
+    """Swap `old` (a Picture shape) in-place: capture its geometry, remove
+    the old <p:pic> element from spTree, and insert the new picture
+    aspect-fitted inside the same box.
 
     Also drops the old picture's <Relationship> from the slide's rels so
     the package doesn't carry an orphan reference (image file bloat —
@@ -53,10 +72,6 @@ def replace_picture(slide, which: int, png_path: str):
     PowerPoint silently keeps the embed if the rel survives; this is the
     P0-#4 cleanup.
     """
-    pics = _picture_shapes(slide)
-    if which >= len(pics):
-        return
-    old = pics[which]
     left, top, width, height = old.left, old.top, old.width, old.height
 
     # Capture the rId of the old picture's blip embed before we drop the
@@ -78,7 +93,22 @@ def replace_picture(slide, which: int, png_path: str):
         except Exception:
             pass
 
+    with Image.open(png_path) as im:
+        img_w, img_h = im.size
+    left, top, width, height = _fit_inside(img_w, img_h, left, top, width, height)
     slide.shapes.add_picture(png_path, left, top, width=width, height=height)
+
+
+def replace_picture(slide, which: int, png_path: str):
+    """Swap the `which`-th picture (document order) with `png_path`.
+    NOTE: do NOT call this twice with indices on the same slide — the first
+    swap removes a shape and appends the new one at the end of spTree, so
+    index 1 afterwards hits the just-inserted picture. Snapshot the shapes
+    first and use _replace_picture_shape instead (see build_ppt P4)."""
+    pics = _picture_shapes(slide)
+    if which >= len(pics):
+        return
+    _replace_picture_shape(slide, pics[which], png_path)
 
 
 def set_text(slide, name_part: str, text: str):
@@ -197,10 +227,17 @@ def build_ppt(template_path, png_paths, ai_texts, narratives, procurement_items,
     S = prs.slides
     logger.info("PPT 模板打开 slides=%d", len(prs.slides))
 
-    # 页3 销售表现
+    # 页3 销售表现 — 顶部长条放三周对比表, 右下放每日销售图。
+    # 必须先快照两个占位形状再按形状替换: 替换会删除旧图并把新图追加到
+    # spTree 末尾, 若按索引连续调用 replace_picture(0/1), 第二次会命中
+    # 刚插入的新图 (旧 bug: 三周表被压进右下槽, 长条槽残留模板旧图)。
     set_text(S[3], "文本框 5", ai_texts.get("week_compare", ""))
-    replace_picture(S[3], 0, png_paths["overview"])
-    replace_picture(S[3], 1, png_paths["three_weeks"])
+    p4_pics = _picture_shapes(S[3])
+    if len(p4_pics) >= 2:
+        _replace_picture_shape(S[3], p4_pics[1], png_paths["three_weeks"])  # 顶部长条
+        _replace_picture_shape(S[3], p4_pics[0], png_paths["daily"])        # 右下
+    elif len(p4_pics) == 1:
+        _replace_picture_shape(S[3], p4_pics[0], png_paths["three_weeks"])
     # 页4 每日
     replace_picture(S[4], 0, png_paths["daily"])
     # 页5 品牌

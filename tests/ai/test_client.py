@@ -140,9 +140,18 @@ def test_resolve_provider_kimi(monkeypatch):
     p = _resolve_provider("kimi")
     assert p["provider_id"] == "kimi"
     assert p["api_key"] == "k-key"
-    assert p["base_url"] == "https://api.moonshot.cn/v1"
+    assert p["base_url"] == "https://api.kimi.com/coding/v1"
     assert p["supports_thinking"] is True
-    assert p["model"] == "kimi-k2.6"
+    assert p["model"] == "k3"
+
+
+def test_resolve_provider_glm(monkeypatch):
+    monkeypatch.setenv("GLM_API_KEY", "g-key")
+    p = _resolve_provider("glm")
+    assert p["provider_id"] == "glm"
+    assert p["api_key"] == "g-key"
+    assert p["base_url"] == "https://open.bigmodel.cn/api/coding/paas/v4"
+    assert p["model"] == "glm-5.2"
 
 
 def test_resolve_provider_unknown_falls_back(monkeypatch):

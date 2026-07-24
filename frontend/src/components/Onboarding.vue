@@ -42,7 +42,7 @@ const FLOW = [
     tab: 'preview',
     title: '预览: KPI + 11 张图',
     body: '顶部 4 个 KPI(加权口径),下方 11 张图涵盖品牌 / 平台 / TOP / 新品 / 工厂。',
-    sub: ['近三周对比 + 工厂 TOP5 以表格呈现','每张图都有独立卡片头(标题/描述/类型)'],
+    sub: ['近三周对比 + 工厂 TOP15 以表格呈现','每张图都有独立卡片头(标题/描述/类型)'],
     target: '.kpi-grid',
     side: 'bottom',
     primary: '下一步',

@@ -280,7 +280,7 @@ function restartFromScratch() {
           { key: 'product_heatmap', title: '产品热力 TOP15' },
           { key: 'new_products', title: '新品表现' },
           { key: 'three_weeks', title: '近三周对比' },
-          { key: 'factory', title: '工厂 TOP5' },
+          { key: 'factory', title: '工厂 TOP15' },
         ]" :key="f.key">
           <div class="card-head">
             <h3 style="font-size:13.5px">{{ f.title }}</h3>

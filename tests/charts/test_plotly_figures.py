@@ -25,3 +25,8 @@ def test_fig_platform_two_subplots():
 def test_fig_three_weeks_table():
     fig = pf.fig_three_weeks_table([{"week_id":"2026-W27","销售额":100,"销售毛利":50,"销售毛利率":0.5}])
     assert fig is not None
+
+def test_fig_factory_table_uses_top15():
+    b = _bundle()
+    fig = pf.fig_factory_table(b)
+    assert len(fig.data[0].cells.values[0]) == len(b.factory_top15)

@@ -45,6 +45,67 @@ def _localname(el):
     return tag.rpartition("}")[2] if isinstance(tag, str) and "}" in tag else (tag or "")
 
 
+def test_p4_slots_get_three_weeks_and_daily_with_aspect_fit():
+    """回归: P4 两个图片槽必须分别换成三周表(顶部长条)和每日图(右下),
+    且保持宽高比居中适配, 不拉伸。旧 bug: 按索引连续替换时第二次替换
+    命中刚插入的新图 — 长条槽残留模板旧图, 三周表被压进右下槽拉伸。"""
+    from PIL import Image
+    d = tempfile.mkdtemp()
+
+    def mkpng(name, w, h, color):
+        p = os.path.join(d, name + ".png")
+        Image.new("RGB", (w, h), color).save(p)
+        return p
+
+    pngs = _pngs(d)
+    pngs["three_weeks"] = mkpng("three_weeks", 1000, 200, (255, 0, 0))   # ar=5.0
+    pngs["daily"] = mkpng("daily", 800, 400, (0, 255, 0))                # ar=2.0
+    out = build_ppt(
+        template_path="resource/2026年第二十七周周报-王凡.pptx",
+        png_paths=pngs,
+        ai_texts={}, narratives={},
+        procurement_items=[], plan_items=[],
+        week_meta={"week_id": "2026-W27"},
+        out_path=os.path.join(d, "p4.pptx"),
+        has_new_products=False,
+    )
+    prs = Presentation(out)
+    blobs = {}
+    for name in ("three_weeks", "daily"):
+        with open(pngs[name], "rb") as f:
+            blobs[name] = f.read()
+    found = {}
+    s = prs.slides[3]
+    for sh in s.shapes:
+        if sh.shape_type != 13:
+            continue
+        blip = sh._element.find(".//{http://schemas.openxmlformats.org/drawingml/2006/main}blip")
+        rid = blip.get("{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed")
+        blob = s.part.rels[rid].target_part.blob
+        for name, b in blobs.items():
+            if blob == b:
+                found[name] = sh
+    assert set(found) == {"three_weeks", "daily"}, \
+        f"P4 应只有三周表+每日图两张替换图(模板旧图须清除), 实得 {set(found)}"
+
+    # 从模板读真实槽位几何: 长条槽(top 靠上) vs 右下槽
+    tpl = Presentation("resource/2026年第二十七周周报-王凡.pptx")
+    tpl_pics = [sh for sh in tpl.slides[3].shapes if sh.shape_type == 13]
+    strip = min(tpl_pics, key=lambda s: s.top)   # 长条槽 ar≈6.38
+    lower = max(tpl_pics, key=lambda s: s.top)   # 右下槽 ar≈1.71
+    tol = 20000  # ~0.02in
+    # 图 ar=5 < 长条槽 → 等高居中: 高=槽高, 顶对齐, 左边内缩
+    tw = found["three_weeks"]
+    assert abs(tw.top - strip.top) < tol
+    assert abs(tw.height - strip.height) < tol
+    assert tw.left > strip.left, "宽高比保持时应水平居中(左边内缩)"
+    # 图 ar=2 > 右下槽 → 等宽居中: 宽=槽宽, 左对齐, 上边内缩
+    daily = found["daily"]
+    assert abs(daily.left - lower.left) < tol
+    assert abs(daily.width - lower.width) < tol
+    assert daily.top > lower.top, "宽高比保持时应垂直居中(上边内缩)"
+
+
 def test_build_ppt_smoke():
     d = tempfile.mkdtemp()
     out = build_ppt(
